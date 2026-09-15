@@ -1,6 +1,11 @@
 name: Playwright PAY. checkout
 
 on:
+  push:
+    paths:
+      - '.github/workflows/playwright.yml'
+      - 'tests/Acceptance/**'
+      - 'src/**'
   workflow_dispatch:
     inputs:
       plugin_ref:
@@ -28,7 +33,7 @@ jobs:
     env:
       CI: true
       LANG: en-DE
-      SHOPWARE_VERSION: ${{ inputs.shopware_version }}
+      SHOPWARE_VERSION: ${{ inputs.shopware_version || '6.7.10.0' }}
       SHOPWARE_PORT: '8080'
       SHOPWARE_ADMIN_USERNAME: admin
       SHOPWARE_ADMIN_PASSWORD: shopware
