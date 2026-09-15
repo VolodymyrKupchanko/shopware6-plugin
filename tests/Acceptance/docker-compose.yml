@@ -1,0 +1,13 @@
+services:
+  shopware:
+    image: dockware/shopware:${SHOPWARE_VERSION:-6.7.10.0}
+    container_name: paynl_sw6_e2e
+    ports:
+      - "${SHOPWARE_PORT:-8080}:80"
+    volumes:
+      - ../..:/var/www/html/custom/plugins/PaynlPaymentShopware6
+    environment:
+      PHP_VERSION: "8.3"
+      XDEBUG_ENABLED: "0"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
