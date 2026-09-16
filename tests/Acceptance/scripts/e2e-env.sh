@@ -78,7 +78,28 @@ shopware_exec() {
 }
 
 http_code() {
-    curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$1" || true
+    local code
+    code="$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 2 --max-time 5 "$1" 2>/dev/null || true)"
+    printf '%s' "${code:-000}"
+}
+
+wait_for_dockware_ready() {
+    log "Waiting for Dockware to unpack Shopware (Apache is down during this; connection resets are normal)"
+    local elapsed=0
+    while true; do
+        if docker logs "${CONTAINER_NAME}" 2>&1 | grep -q 'container IS READY'; then
+            log "Dockware reports the container is ready"
+            sleep 3
+            return
+        fi
+        if (( elapsed >= SHOPWARE_WAIT_SECONDS )); then
+            "${COMPOSE[@]}" logs --tail 80 shopware || true
+            fail "Dockware did not finish startup within ${SHOPWARE_WAIT_SECONDS}s"
+        fi
+        sleep 5
+        elapsed=$((elapsed + 5))
+        log "still unpacking Dockware (${elapsed}s)"
+    done
 }
 
 shopware_mysql() {
@@ -136,9 +157,10 @@ ensure_sales_channel_domain() {
 }
 
 wait_for_shopware() {
+    wait_for_dockware_ready
     local health="http://127.0.0.1:${SHOPWARE_PORT}/api/_info/health-check"
     local storefront="http://127.0.0.1:${SHOPWARE_PORT}/"
-    log "Waiting for Shopware HTTP on port ${SHOPWARE_PORT} (Dockware decompress can take several minutes)"
+    log "Waiting for Shopware HTTP on port ${SHOPWARE_PORT}"
     local elapsed=0
     local health_code="000"
     local store_code="000"
@@ -149,18 +171,17 @@ wait_for_shopware() {
             break
         fi
         # 500 is Shopware's "unknown domain" help page; 200 is a mapped storefront.
-        # Ignore 404 from Dockware's early Apache restart before Shopware is unpacked.
         if [[ "${store_code}" == "200" || "${store_code}" == "500" ]]; then
             log "Shopware HTTP is up (storefront ${store_code}, health-check ${health_code})"
             break
         fi
-        if (( elapsed >= SHOPWARE_WAIT_SECONDS )); then
+        if (( elapsed >= 120 )); then
             "${COMPOSE[@]}" logs --tail 80 shopware || true
-            fail "Shopware did not become ready within ${SHOPWARE_WAIT_SECONDS}s (health-check ${health_code}, storefront ${store_code})"
+            fail "Shopware HTTP did not become ready within 120s after Dockware startup (health-check ${health_code}, storefront ${store_code})"
         fi
         sleep 5
         elapsed=$((elapsed + 5))
-        log "still waiting (${elapsed}s, health-check ${health_code}, storefront ${store_code})"
+        log "still waiting for HTTP (${elapsed}s, health-check ${health_code}, storefront ${store_code})"
     done
     log "Shopware is responding"
     ensure_sales_channel_domain "http://127.0.0.1:${SHOPWARE_PORT}"
