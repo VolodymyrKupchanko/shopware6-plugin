@@ -48,13 +48,27 @@ export async function hideProfiler(page: Page): Promise<void> {
     }).catch(() => undefined);
 }
 
+async function storefrontFailureContext(page: Page): Promise<string> {
+    const title = await page.title().catch(() => '');
+    const heading = await page.locator('h1, .alert, .product-detail-name').first().textContent().catch(() => '');
+    return `url=${page.url()} title=${title.trim()} heading=${(heading || '').trim().slice(0, 180)}`;
+}
+
 export async function addProductToCart(page: Page, quantity = '1'): Promise<void> {
-    const addToCart = page.getByRole('button', {
-        name: /add to shopping cart|add to cart|in den warenkorb/i,
-    }).first();
+    const context = await storefrontFailureContext(page);
+    if (/unknown Domain|Sales Channel Domains/i.test(context)) {
+        throw new Error(`Shopware does not recognise this storefront URL. ${context}`);
+    }
+    if (/verify you are human|just a moment|attention required|you are about to visit/i.test(context)) {
+        throw new Error(`Tunnel or bot check blocked the storefront. ${context}`);
+    }
+
+    const addToCart = page.locator('button.btn-buy').or(
+        page.getByRole('button', { name: /add to shopping cart|add to cart|in den warenkorb|in winkelwagen/i }),
+    ).first();
     await expect(
         addToCart,
-        'Add to cart was not shown. The product page is missing, or ngrok/Cloudflare blocked the storefront.',
+        `Add to cart was not shown. ${context}`,
     ).toBeVisible({ timeout: 20_000 });
 
     const quantityField = page.locator('.buy-widget:not(.d-none), .product-detail-buy').locator(

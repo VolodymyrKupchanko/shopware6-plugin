@@ -24,7 +24,7 @@ test.describe('PAY. checkout', () => {
 
         await prepareStorefront(StorefrontPage);
 
-        await ShopCustomer.goesTo(StorefrontProductDetail.url(ProductData));
+        await ShopCustomer.goesTo(`detail/${ProductData.id}`);
         await addProductToCart(StorefrontPage);
         await StorefrontProductDetail.offCanvasCartGoToCheckoutButton.click();
         await StorefrontPage.waitForURL(/checkout\/(register|confirm)/);
