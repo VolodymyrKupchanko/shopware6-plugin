@@ -1,5 +1,5 @@
 import { test, expect } from '@shopware-ag/acceptance-test-suite';
-import { assignPayPaymentMethod, waitForPaidOrder } from '../src/shopware-admin';
+import { assignPayPaymentMethod, ensureStorefrontDomainAliases, waitForPaidOrder } from '../src/shopware-admin';
 import { completePaySandbox, parseAmount } from '../src/pay-sandbox';
 import { addProductToCart, enableGuestCheckout, isPasswordRequired, prepareStorefront } from '../src/storefront';
 
@@ -22,7 +22,13 @@ test.describe('PAY. checkout', () => {
             DefaultSalesChannel.salesChannel.id,
         );
 
+        await ensureStorefrontDomainAliases(
+            AdminApiContext,
+            DefaultSalesChannel.url,
+            DefaultSalesChannel.salesChannel.id,
+        );
         await prepareStorefront(StorefrontPage);
+        await StorefrontPage.goto('./', { waitUntil: 'domcontentloaded' });
 
         await ShopCustomer.goesTo(`detail/${ProductData.id}`);
         await addProductToCart(StorefrontPage);

@@ -216,7 +216,7 @@ start_tunnel() {
 
     if [[ -n "${NGROK_AUTHTOKEN:-}" ]] && command -v ngrok >/dev/null 2>&1; then
         log "Starting ngrok tunnel to ${target}"
-        ngrok http "${SHOPWARE_PORT}" --log=stdout >"${TUNNEL_LOG}" 2>&1 &
+        ngrok http "${SHOPWARE_PORT}" --request-header-add "X-Forwarded-Proto:https" --log=stdout >"${TUNNEL_LOG}" 2>&1 &
         echo $! > "${TUNNEL_PID_FILE}"
         local elapsed=0
         while (( elapsed < 45 )); do
@@ -290,11 +290,19 @@ configure_shopware() {
 cd /var/www/html
 if [[ -f .env ]]; then
   grep -q "^APP_URL=" .env && sed -i "s|^APP_URL=.*|APP_URL=${APP_URL_VALUE}|" .env || echo "APP_URL=${APP_URL_VALUE}" >> .env
-  grep -q "^TRUSTED_PROXIES=" .env && sed -i "s|^TRUSTED_PROXIES=.*|TRUSTED_PROXIES=REMOTE_ADDR|" .env || echo "TRUSTED_PROXIES=REMOTE_ADDR" >> .env
+  grep -q "^TRUSTED_PROXIES=" .env && sed -i "s|^TRUSTED_PROXIES=.*|TRUSTED_PROXIES=127.0.0.1,REMOTE_ADDR|" .env || echo "TRUSTED_PROXIES=127.0.0.1,REMOTE_ADDR" >> .env
+  if grep -q "^TRUSTED_HEADERS=" .env; then
+    sed -i "s|^TRUSTED_HEADERS=.*|TRUSTED_HEADERS=x-forwarded-for,x-forwarded-host,x-forwarded-proto,x-forwarded-port,x-forwarded-prefix|" .env
+  else
+    echo "TRUSTED_HEADERS=x-forwarded-for,x-forwarded-host,x-forwarded-proto,x-forwarded-port,x-forwarded-prefix" >> .env
+  fi
   grep -q "^SHOPWARE_HTTP_CACHE_ENABLED=" .env && sed -i "s|^SHOPWARE_HTTP_CACHE_ENABLED=.*|SHOPWARE_HTTP_CACHE_ENABLED=0|" .env || echo "SHOPWARE_HTTP_CACHE_ENABLED=0" >> .env
 fi
 '
     ensure_sales_channel_domain "${app_url}"
+    if [[ "${app_url}" == https://* ]]; then
+        ensure_sales_channel_domain "http://${app_url#https://}"
+    fi
 
     install_plugin_sdk
 

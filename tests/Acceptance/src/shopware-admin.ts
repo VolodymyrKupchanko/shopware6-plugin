@@ -145,6 +145,69 @@ async function ensurePayPaymentMethods(adminApi: AdminApiContext): Promise<Array
     return methods.filter((method) => method.active);
 }
 
+type DomainRecord = {
+    id: string;
+    url?: string;
+    languageId?: string;
+    currencyId?: string;
+    snippetSetId?: string;
+    attributes?: {
+        url?: string;
+        languageId?: string;
+        currencyId?: string;
+        snippetSetId?: string;
+    };
+};
+
+export async function ensureStorefrontDomainAliases(
+    adminApi: AdminApiContext,
+    storefrontUrl: string,
+    salesChannelId: string,
+): Promise<void> {
+    const canonical = storefrontUrl.replace(/\/$/, '');
+    const wanted = [canonical];
+    if (canonical.startsWith('https://')) {
+        wanted.push(canonical.replace(/^https:/, 'http:'));
+    }
+
+    const search = await adminApi.post('./search/sales-channel-domain', {
+        data: {
+            limit: 50,
+            filter: [{ type: 'equals', field: 'salesChannelId', value: salesChannelId }],
+        },
+    });
+    expect(search.ok(), `Sales channel domain search failed: ${search.status()} ${await search.text()}`).toBeTruthy();
+    const payload = (await search.json()) as SearchResponse<DomainRecord>;
+    const existing = payload.data ?? [];
+    const known = new Set(
+        existing.map((domain) => (domain.attributes?.url ?? domain.url ?? '').replace(/\/$/, '')),
+    );
+    const template = existing[0];
+    expect(template, `Sales channel ${salesChannelId} has no domain to copy`).toBeTruthy();
+
+    for (const url of wanted) {
+        if (known.has(url)) {
+            continue;
+        }
+        const create = await adminApi.post('./sales-channel-domain?_response=detail', {
+            data: {
+                salesChannelId,
+                url,
+                languageId: template.attributes?.languageId ?? template.languageId,
+                currencyId: template.attributes?.currencyId ?? template.currencyId,
+                snippetSetId: template.attributes?.snippetSetId ?? template.snippetSetId,
+            },
+        });
+        expect(
+            create.ok(),
+            `Could not add sales channel domain ${url}: ${create.status()} ${await create.text()}`,
+        ).toBeTruthy();
+        known.add(url);
+    }
+
+    await adminApi.delete('./_action/cache').catch(() => undefined);
+}
+
 export async function assignPayPaymentMethod(
     adminApi: AdminApiContext,
     testDataService: SalesChannelPaymentAssigner,

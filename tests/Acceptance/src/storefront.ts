@@ -56,7 +56,7 @@ async function storefrontFailureContext(page: Page): Promise<string> {
 
 export async function addProductToCart(page: Page, quantity = '1'): Promise<void> {
     const context = await storefrontFailureContext(page);
-    if (/unknown Domain|Sales Channel Domains/i.test(context)) {
+    if (/unknown Domain|Sales Channel Domains|Domain Mapping/i.test(context)) {
         throw new Error(`Shopware does not recognise this storefront URL. ${context}`);
     }
     if (/verify you are human|just a moment|attention required|you are about to visit/i.test(context)) {
