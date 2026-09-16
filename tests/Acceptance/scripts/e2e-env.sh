@@ -363,9 +363,6 @@ echo "---- paynl logs ----"
 ls -la var/log || true
 ' > "${DIAGNOSTICS_DIR}/shopware-console.txt" 2>&1 || true
     docker cp "${CONTAINER_NAME}:/var/www/html/var/log/." "${DIAGNOSTICS_DIR}/shopware-var-log" 2>/dev/null || true
-    if [[ -f "${TUNNEL_LOG}" ]]; then
-        cp "${TUNNEL_LOG}" "${DIAGNOSTICS_DIR}/tunnel.log"
-    fi
 }
 
 cmd_up() {

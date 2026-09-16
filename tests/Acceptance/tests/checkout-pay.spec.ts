@@ -1,7 +1,7 @@
 import { test, expect } from '@shopware-ag/acceptance-test-suite';
 import { assignPayPaymentMethod, waitForPaidOrder } from '../src/shopware-admin';
 import { completePaySandbox, parseAmount } from '../src/pay-sandbox';
-import { acceptCookies, enableGuestCheckout, hideProfiler, isPasswordRequired } from '../src/storefront';
+import { addProductToCart, enableGuestCheckout, isPasswordRequired, prepareStorefront } from '../src/storefront';
 
 test.describe('PAY. checkout', () => {
     test('guest checkout reaches paid after PAY. sandbox payment', async ({
@@ -14,7 +14,6 @@ test.describe('PAY. checkout', () => {
         AdminApiContext,
         TestDataService,
         ShopCustomer,
-        AddProductToCart,
         Register,
     }) => {
         const payMethod = await assignPayPaymentMethod(
@@ -23,11 +22,10 @@ test.describe('PAY. checkout', () => {
             DefaultSalesChannel.salesChannel.id,
         );
 
-        await hideProfiler(StorefrontPage);
-        await acceptCookies(StorefrontPage);
+        await prepareStorefront(StorefrontPage);
 
         await ShopCustomer.goesTo(StorefrontProductDetail.url(ProductData));
-        await ShopCustomer.attemptsTo(AddProductToCart(ProductData));
+        await addProductToCart(StorefrontPage);
         await StorefrontProductDetail.offCanvasCartGoToCheckoutButton.click();
         await StorefrontPage.waitForURL(/checkout\/(register|confirm)/);
 
