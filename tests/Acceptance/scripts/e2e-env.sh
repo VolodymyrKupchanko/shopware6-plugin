@@ -12,7 +12,7 @@ TUNNEL_PID_FILE="${ACCEPTANCE_DIR}/diagnostics/tunnel.pid"
 
 SHOPWARE_VERSION="${SHOPWARE_VERSION:-6.7.10.0}"
 SHOPWARE_PORT="${SHOPWARE_PORT:-8080}"
-SHOPWARE_WAIT_SECONDS="${SHOPWARE_WAIT_SECONDS:-180}"
+SHOPWARE_WAIT_SECONDS="${SHOPWARE_WAIT_SECONDS:-600}"
 
 export SHOPWARE_VERSION SHOPWARE_PORT
 
@@ -77,20 +77,93 @@ shopware_exec() {
     docker exec -u dockware -i "${CONTAINER_NAME}" bash -lc "$*"
 }
 
+http_code() {
+    curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$1" || true
+}
+
+shopware_mysql() {
+    docker exec -e MYSQL_PWD=root "${CONTAINER_NAME}" \
+        mysql -h 127.0.0.1 -u root --batch --raw --skip-column-names shopware -e "$1"
+}
+
+sql_escape() {
+    printf '%s' "$1" | sed "s/'/''/g"
+}
+
+ensure_sales_channel_domain() {
+    local url="${1%/}"
+    [[ -n "${url}" ]] || fail "sales channel domain URL is empty"
+    local escaped
+    escaped="$(sql_escape "${url}")"
+    log "Ensuring sales channel domain ${url}"
+
+    local existing
+    existing="$(shopware_mysql "SELECT url FROM sales_channel_domain WHERE url='${escaped}' LIMIT 1" || true)"
+    if [[ -n "${existing}" ]]; then
+        log "Sales channel domain already has ${url}"
+        return
+    fi
+
+    if [[ "${url}" == "http://127.0.0.1:${SHOPWARE_PORT}" ]]; then
+        shopware_mysql "UPDATE sales_channel_domain
+            SET url='${escaped}', updated_at=NOW(3)
+            WHERE url IN ('http://localhost', 'http://localhost/', 'http://localhost:80')"
+        existing="$(shopware_mysql "SELECT url FROM sales_channel_domain WHERE url='${escaped}' LIMIT 1" || true)"
+        if [[ -n "${existing}" ]]; then
+            shopware_exec 'cd /var/www/html && php bin/console cache:clear -n'
+            return
+        fi
+    fi
+
+    if shopware_mysql "INSERT INTO sales_channel_domain
+        (id, sales_channel_id, language_id, url, currency_id, snippet_set_id, hreflang_use_only_locale, created_at)
+        SELECT UNHEX(REPLACE(UUID(), '-', '')), sales_channel_id, language_id, '${escaped}',
+            currency_id, snippet_set_id, hreflang_use_only_locale, NOW(3)
+        FROM sales_channel_domain
+        WHERE url NOT LIKE 'default.headless%'
+        ORDER BY created_at
+        LIMIT 1"; then
+        shopware_exec 'cd /var/www/html && php bin/console cache:clear -n'
+        return
+    fi
+
+    log "Insert failed; pointing existing storefront domain at ${url}"
+    shopware_mysql "UPDATE sales_channel_domain
+        SET url='${escaped}', updated_at=NOW(3)
+        WHERE url NOT LIKE 'default.headless%'
+        LIMIT 1"
+    shopware_exec 'cd /var/www/html && php bin/console cache:clear -n'
+}
+
 wait_for_shopware() {
-    local url="http://127.0.0.1:${SHOPWARE_PORT}/"
-    log "Waiting for Shopware at ${url}"
+    local health="http://127.0.0.1:${SHOPWARE_PORT}/api/_info/health-check"
+    local storefront="http://127.0.0.1:${SHOPWARE_PORT}/"
+    log "Waiting for Shopware HTTP on port ${SHOPWARE_PORT} (Dockware decompress can take several minutes)"
     local elapsed=0
-    until curl -fsS --max-time 5 "${url}" >/dev/null 2>&1; do
+    local health_code="000"
+    local store_code="000"
+    while true; do
+        health_code="$(http_code "${health}")"
+        store_code="$(http_code "${storefront}")"
+        if [[ "${health_code}" == "200" || "${health_code}" == "204" ]]; then
+            break
+        fi
+        # 500 is Shopware's "unknown domain" help page; 200 is a mapped storefront.
+        # Ignore 404 from Dockware's early Apache restart before Shopware is unpacked.
+        if [[ "${store_code}" == "200" || "${store_code}" == "500" ]]; then
+            log "Shopware HTTP is up (storefront ${store_code}, health-check ${health_code})"
+            break
+        fi
         if (( elapsed >= SHOPWARE_WAIT_SECONDS )); then
             "${COMPOSE[@]}" logs --tail 80 shopware || true
-            fail "Shopware did not become ready within ${SHOPWARE_WAIT_SECONDS}s"
+            fail "Shopware did not become ready within ${SHOPWARE_WAIT_SECONDS}s (health-check ${health_code}, storefront ${store_code})"
         fi
         sleep 5
         elapsed=$((elapsed + 5))
-        log "still waiting (${elapsed}s)"
+        log "still waiting (${elapsed}s, health-check ${health_code}, storefront ${store_code})"
     done
     log "Shopware is responding"
+    ensure_sales_channel_domain "http://127.0.0.1:${SHOPWARE_PORT}"
 }
 
 admin_token() {
@@ -197,6 +270,7 @@ if [[ -f .env ]]; then
   grep -q "^SHOPWARE_HTTP_CACHE_ENABLED=" .env && sed -i "s|^SHOPWARE_HTTP_CACHE_ENABLED=.*|SHOPWARE_HTTP_CACHE_ENABLED=0|" .env || echo "SHOPWARE_HTTP_CACHE_ENABLED=0" >> .env
 fi
 '
+    ensure_sales_channel_domain "${app_url}"
 
     install_plugin_sdk
 
