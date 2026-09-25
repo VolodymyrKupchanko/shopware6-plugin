@@ -2,18 +2,15 @@ import { expect, type Page } from '@playwright/test';
 
 const PAY_HOST = /pay\.nl|achterelkebetaling\.nl|payments\.nl/i;
 const ISSUER_HOST = /ideal\.nl|cloudflare/i;
-const ENGLISH_SANDBOX = /^https:\/\/checkout\.pay\.nl\/en-us\/sandbox\/?/i;
+const ORDER_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const ENGLISH_SANDBOX = /^https:\/\/checkout\.pay\.nl\/en-us\/sandbox\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i;
 
-function toEnglishSandbox(currentHref: string): string {
-    const current = new URL(currentHref);
-    const target = new URL('https://checkout.pay.nl/en-us/sandbox/');
-    const segments = current.pathname.split('/').filter(Boolean);
-    const sandboxAt = segments.findIndex((segment) => segment.toLowerCase() === 'sandbox');
-    const extra = sandboxAt >= 0 ? segments.slice(sandboxAt + 1) : [];
-    target.pathname = ['/en-us/sandbox', ...extra].join('/') + '/';
-    target.search = current.search;
-    target.hash = current.hash;
-    return target.toString();
+function englishSandboxUrl(currentHref: string): string {
+    const orderId = currentHref.match(ORDER_ID)?.[0];
+    if (!orderId) {
+        throw new Error(`PAY. checkout URL has no order id for the sandbox: ${currentHref}`);
+    }
+    return `https://checkout.pay.nl/en-us/sandbox/${orderId}`;
 }
 
 function sandboxSecret(): string {
@@ -21,10 +18,7 @@ function sandboxSecret(): string {
 }
 
 function secretField(page: Page) {
-    return page.getByPlaceholder(/verkaufsstelle|sales location secret|verkooplocatie|geheimnis|secret/i)
-        .or(page.locator('input[name="secret"], input[id="secret"]'))
-        .or(page.locator('input[type="password"]:not([name="save-secret"])'))
-        .first();
+    return page.locator('input#secret');
 }
 
 async function isCloudflareChallenge(page: Page): Promise<boolean> {
@@ -46,25 +40,11 @@ async function leaveIssuerChallenge(page: Page): Promise<void> {
 }
 
 async function openEnglishSandbox(page: Page): Promise<void> {
-    if (!ENGLISH_SANDBOX.test(page.url())) {
-        await page.goto(toEnglishSandbox(page.url()), { waitUntil: 'domcontentloaded' });
+    const target = englishSandboxUrl(page.url());
+    if (page.url().replace(/\/$/, '') !== target) {
+        await page.goto(target, { waitUntil: 'domcontentloaded' });
     }
     await expect(page).toHaveURL(ENGLISH_SANDBOX);
-}
-
-async function selectSandboxPaymentMethod(page: Page): Promise<void> {
-    await openEnglishSandbox(page);
-    if (await secretField(page).isVisible().catch(() => false)) {
-        return;
-    }
-
-    const sandbox = page.getByRole('link', { name: /sandbox/i })
-        .or(page.getByRole('button', { name: /sandbox/i }))
-        .or(page.getByText(/^sandbox$/i));
-    if (await sandbox.first().isVisible({ timeout: 4000 }).catch(() => false)) {
-        await sandbox.first().click();
-        await openEnglishSandbox(page);
-    }
 }
 
 async function fillSandboxForm(page: Page, amount: string): Promise<void> {
@@ -75,20 +55,15 @@ async function fillSandboxForm(page: Page, amount: string): Promise<void> {
     ).not.toEqual('');
 
     await leaveIssuerChallenge(page);
-    await selectSandboxPaymentMethod(page);
-    await leaveIssuerChallenge(page);
+    await openEnglishSandbox(page);
 
     const secretInput = secretField(page);
-    await expect(
-        secretInput,
-        'PAY. sandbox secret field was not shown on https://checkout.pay.nl/en-us/sandbox/.',
-    ).toBeVisible({ timeout: 30_000 });
+    await expect(secretInput, `Secret field #secret was not shown at ${page.url()}`).toBeVisible({ timeout: 30_000 });
     await secretInput.fill(secret);
 
-    const paid = page.getByRole('radio', { name: /captured\s*\/\s*paid/i })
-        .or(page.getByText(/captured\s*\/\s*paid/i));
-    await expect(paid.first(), 'Captured/Paid was not shown on the PAY. sandbox').toBeVisible();
-    await paid.first().click();
+    const paid = page.locator('input#captured');
+    await expect(paid, 'Captured/Paid (#captured) was not shown on the PAY. sandbox').toBeVisible();
+    await paid.check();
 
     const amountInput = page.getByPlaceholder(/amount|betrag|bedrag/i)
         .or(page.getByLabel(/amount|betrag|bedrag/i))
@@ -98,9 +73,7 @@ async function fillSandboxForm(page: Page, amount: string): Promise<void> {
         await amountInput.fill(amount);
     }
 
-    const updateButton = page.getByRole('button', {
-        name: /update status|status aktualisieren|status bijwerken|status updaten/i,
-    }).first();
+    const updateButton = page.locator('button[type="submit"]', { hasText: 'Update status' });
     await expect(updateButton).toBeVisible();
     await updateButton.click();
 
