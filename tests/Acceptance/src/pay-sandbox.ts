@@ -2,6 +2,19 @@ import { expect, type Page } from '@playwright/test';
 
 const PAY_HOST = /pay\.nl|achterelkebetaling\.nl|payments\.nl/i;
 const ISSUER_HOST = /ideal\.nl|cloudflare/i;
+const ENGLISH_SANDBOX = /^https:\/\/checkout\.pay\.nl\/en-us\/sandbox\/?/i;
+
+function toEnglishSandbox(currentHref: string): string {
+    const current = new URL(currentHref);
+    const target = new URL('https://checkout.pay.nl/en-us/sandbox/');
+    const segments = current.pathname.split('/').filter(Boolean);
+    const sandboxAt = segments.findIndex((segment) => segment.toLowerCase() === 'sandbox');
+    const extra = sandboxAt >= 0 ? segments.slice(sandboxAt + 1) : [];
+    target.pathname = ['/en-us/sandbox', ...extra].join('/') + '/';
+    target.search = current.search;
+    target.hash = current.hash;
+    return target.toString();
+}
 
 function sandboxSecret(): string {
     return process.env.PAY_SANDBOX_SECRET || '';
@@ -32,7 +45,15 @@ async function leaveIssuerChallenge(page: Page): Promise<void> {
     }
 }
 
+async function openEnglishSandbox(page: Page): Promise<void> {
+    if (!ENGLISH_SANDBOX.test(page.url())) {
+        await page.goto(toEnglishSandbox(page.url()), { waitUntil: 'domcontentloaded' });
+    }
+    await expect(page).toHaveURL(ENGLISH_SANDBOX);
+}
+
 async function selectSandboxPaymentMethod(page: Page): Promise<void> {
+    await openEnglishSandbox(page);
     if (await secretField(page).isVisible().catch(() => false)) {
         return;
     }
@@ -42,13 +63,7 @@ async function selectSandboxPaymentMethod(page: Page): Promise<void> {
         .or(page.getByText(/^sandbox$/i));
     if (await sandbox.first().isVisible({ timeout: 4000 }).catch(() => false)) {
         await sandbox.first().click();
-        return;
-    }
-
-    const other = page.getByRole('link', { name: /credit.?card|visa|mastercard|bancontact|overboeking|bank.?transfer|paypal|afterpay/i })
-        .or(page.getByRole('button', { name: /credit.?card|visa|mastercard|bancontact|overboeking|paypal/i }));
-    if (await other.first().isVisible({ timeout: 2000 }).catch(() => false)) {
-        await other.first().click();
+        await openEnglishSandbox(page);
     }
 }
 
@@ -66,7 +81,7 @@ async function fillSandboxForm(page: Page, amount: string): Promise<void> {
     const secretInput = secretField(page);
     await expect(
         secretInput,
-        'PAY. sandbox secret field was not shown. Stay on the PAY. sandbox (secret + Captured/Paid); do not follow iDEAL/Cloudflare.',
+        'PAY. sandbox secret field was not shown on https://checkout.pay.nl/en-us/sandbox/.',
     ).toBeVisible({ timeout: 30_000 });
     await secretInput.fill(secret);
 
