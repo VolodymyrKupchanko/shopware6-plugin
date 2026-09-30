@@ -2,7 +2,18 @@ import { expect, type Page } from '@playwright/test';
 
 const PAY_HOST = /pay\.nl|achterelkebetaling\.nl|payments\.nl/i;
 const ISSUER_HOST = /ideal\.nl|cloudflare/i;
-const SANDBOX_FORM = /\/pay\/with\/sandbox\/?$/i;
+const LOCALE = /\/([a-z]{2}-[a-z]{2})\//i;
+const ORDER_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const SANDBOX_FORM = /^https:\/\/checkout\.pay\.nl\/[a-z]{2}-[a-z]{2}\/sandbox\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i;
+
+function sandboxUrl(currentHref: string): string {
+    const locale = currentHref.match(LOCALE)?.[1];
+    const orderId = currentHref.match(ORDER_ID)?.[0];
+    if (!locale || !orderId) {
+        throw new Error(`PAY. checkout URL has no locale or order id for the sandbox: ${currentHref}`);
+    }
+    return `https://checkout.pay.nl/${locale}/sandbox/${orderId}`;
+}
 
 function sandboxSecret(): string {
     return process.env.PAY_SANDBOX_SECRET || '';
@@ -31,13 +42,10 @@ async function leaveIssuerChallenge(page: Page): Promise<void> {
 }
 
 async function openSandbox(page: Page): Promise<void> {
-    if (SANDBOX_FORM.test(new URL(page.url()).pathname)) {
-        return;
+    const target = sandboxUrl(page.url());
+    if (page.url().replace(/\/$/, '') !== target) {
+        await page.goto(target, { waitUntil: 'domcontentloaded' });
     }
-
-    const sandbox = page.locator('#sandbox a, a[href*="/pay/with/sandbox"]').first();
-    await expect(sandbox, `Sandbox payment method was not shown at ${page.url()}`).toBeVisible();
-    await sandbox.click();
     await expect(page).toHaveURL(SANDBOX_FORM);
 }
 
