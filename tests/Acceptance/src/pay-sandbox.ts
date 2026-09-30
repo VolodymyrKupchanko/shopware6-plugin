@@ -5,6 +5,7 @@ const ISSUER_HOST = /ideal\.nl|cloudflare/i;
 const LOCALE = /\/([a-z]{2}-[a-z]{2})\//i;
 const ORDER_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const SANDBOX_FORM = /^https:\/\/checkout\.pay\.nl\/[a-z]{2}-[a-z]{2}\/sandbox\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i;
+const ENGLISH_SANDBOX = /^https:\/\/checkout\.pay\.nl\/en-us\/sandbox\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i;
 
 function sandboxUrl(currentHref: string): string {
     const locale = currentHref.match(LOCALE)?.[1];
@@ -49,6 +50,22 @@ async function openSandbox(page: Page): Promise<void> {
     await expect(page).toHaveURL(SANDBOX_FORM);
 }
 
+async function selectAmericanEnglish(page: Page): Promise<void> {
+    if (ENGLISH_SANDBOX.test(page.url())) {
+        return;
+    }
+
+    const english = page.locator('a[lang="en_US"][href*="/en-us/sandbox/"]');
+    const languageSelect = page.locator('#language_select');
+    await expect(languageSelect, `Language menu was not shown at ${page.url()}`).toBeVisible();
+    if (!(await english.isVisible().catch(() => false))) {
+        await languageSelect.click();
+    }
+    await expect(english, 'American English was not listed in the sandbox language menu').toBeVisible();
+    await english.click();
+    await expect(page).toHaveURL(ENGLISH_SANDBOX);
+}
+
 async function fillSandboxForm(page: Page, amount: string): Promise<void> {
     const secret = sandboxSecret();
     expect(
@@ -58,6 +75,7 @@ async function fillSandboxForm(page: Page, amount: string): Promise<void> {
 
     await leaveIssuerChallenge(page);
     await openSandbox(page);
+    await selectAmericanEnglish(page);
 
     const secretInput = secretField(page);
     await expect(secretInput, `Secret field #secret was not shown at ${page.url()}`).toBeVisible({ timeout: 30_000 });
@@ -75,9 +93,7 @@ async function fillSandboxForm(page: Page, amount: string): Promise<void> {
         await amountInput.fill(amount);
     }
 
-    const updateButton = page.locator('button[type="submit"]').filter({
-        hasText: /update status|status aktualisieren|status bijwerken/i,
-    });
+    const updateButton = page.locator('button[type="submit"]', { hasText: 'Update status' });
     await expect(updateButton).toBeVisible();
     await updateButton.click();
 
