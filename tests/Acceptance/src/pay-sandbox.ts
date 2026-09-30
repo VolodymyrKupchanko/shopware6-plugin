@@ -2,7 +2,7 @@ import { expect, type Page } from '@playwright/test';
 
 const PAY_HOST = /pay\.nl|achterelkebetaling\.nl|payments\.nl/i;
 const ISSUER_HOST = /ideal\.nl|cloudflare/i;
-const CHECKOUT_HOST = String.raw`checkout\.(?:pay\.nl|achterelkebetaling\.nl)`;
+const CHECKOUT_HOST = String.raw`checkout\.(?:pay\.nl|achterelkebetaling\.nl|payments\.nl)`;
 const ORDER_UUID = String.raw`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`;
 const SANDBOX_FORM = new RegExp(
     `^https:\\/\\/${CHECKOUT_HOST}\\/[a-z]{2}-[a-z]{2}\\/sandbox\\/${ORDER_UUID}\\/?$`,
