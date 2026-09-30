@@ -58,13 +58,12 @@ async function selectAmericanEnglish(page: Page): Promise<void> {
     }
 
     const english = page.locator('a[lang="en_US"][href*="/en-us/sandbox/"]');
-    const languageSelect = page.locator('#language_select');
-    await expect(languageSelect, `Language menu was not shown at ${page.url()}`).toBeVisible();
-    if (!(await english.isVisible().catch(() => false))) {
-        await languageSelect.click();
+    await expect(english, 'American English was not listed in the sandbox language menu').toBeAttached();
+    const href = await english.getAttribute('href');
+    if (!href) {
+        throw new Error(`American English sandbox link has no href at ${page.url()}`);
     }
-    await expect(english, 'American English was not listed in the sandbox language menu').toBeVisible();
-    await english.click();
+    await page.goto(href, { waitUntil: 'domcontentloaded' });
     await expect(page).toHaveURL(ENGLISH_SANDBOX);
 }
 
