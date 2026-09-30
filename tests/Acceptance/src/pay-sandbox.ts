@@ -2,16 +2,7 @@ import { expect, type Page } from '@playwright/test';
 
 const PAY_HOST = /pay\.nl|achterelkebetaling\.nl|payments\.nl/i;
 const ISSUER_HOST = /ideal\.nl|cloudflare/i;
-const ORDER_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
-const ENGLISH_SANDBOX = /^https:\/\/checkout\.pay\.nl\/en-us\/sandbox\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i;
-
-function englishSandboxUrl(currentHref: string): string {
-    const orderId = currentHref.match(ORDER_ID)?.[0];
-    if (!orderId) {
-        throw new Error(`PAY. checkout URL has no order id for the sandbox: ${currentHref}`);
-    }
-    return `https://checkout.pay.nl/en-us/sandbox/${orderId}`;
-}
+const SANDBOX_FORM = /\/pay\/with\/sandbox\/?$/i;
 
 function sandboxSecret(): string {
     return process.env.PAY_SANDBOX_SECRET || '';
@@ -39,12 +30,15 @@ async function leaveIssuerChallenge(page: Page): Promise<void> {
     }
 }
 
-async function openEnglishSandbox(page: Page): Promise<void> {
-    const target = englishSandboxUrl(page.url());
-    if (page.url().replace(/\/$/, '') !== target) {
-        await page.goto(target, { waitUntil: 'domcontentloaded' });
+async function openSandbox(page: Page): Promise<void> {
+    if (SANDBOX_FORM.test(new URL(page.url()).pathname)) {
+        return;
     }
-    await expect(page).toHaveURL(ENGLISH_SANDBOX);
+
+    const sandbox = page.locator('#sandbox a, a[href*="/pay/with/sandbox"]').first();
+    await expect(sandbox, `Sandbox payment method was not shown at ${page.url()}`).toBeVisible();
+    await sandbox.click();
+    await expect(page).toHaveURL(SANDBOX_FORM);
 }
 
 async function fillSandboxForm(page: Page, amount: string): Promise<void> {
@@ -55,7 +49,7 @@ async function fillSandboxForm(page: Page, amount: string): Promise<void> {
     ).not.toEqual('');
 
     await leaveIssuerChallenge(page);
-    await openEnglishSandbox(page);
+    await openSandbox(page);
 
     const secretInput = secretField(page);
     await expect(secretInput, `Secret field #secret was not shown at ${page.url()}`).toBeVisible({ timeout: 30_000 });
@@ -73,7 +67,9 @@ async function fillSandboxForm(page: Page, amount: string): Promise<void> {
         await amountInput.fill(amount);
     }
 
-    const updateButton = page.locator('button[type="submit"]', { hasText: 'Update status' });
+    const updateButton = page.locator('button[type="submit"]').filter({
+        hasText: /update status|status aktualisieren|status bijwerken/i,
+    });
     await expect(updateButton).toBeVisible();
     await updateButton.click();
 
