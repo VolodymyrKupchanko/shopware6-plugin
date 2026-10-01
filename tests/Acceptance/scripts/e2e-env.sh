@@ -96,9 +96,9 @@ wait_for_dockware_ready() {
     while true; do
         if docker logs "${CONTAINER_NAME}" 2>&1 | grep -q 'container IS READY'; then
             log "Dockware reports the container is ready"
-            # Dockware chowns the bind mount. Take back only this directory and .env.
-            # A recursive chown hits node_modules, which Docker Desktop rejects.
-            docker exec "${CONTAINER_NAME}" bash -lc \
+            # Dockware chowns the bind mount and the image user cannot chown it back.
+            # Only this directory and .env: a recursive chown hits node_modules, which Docker Desktop rejects.
+            docker exec -u root "${CONTAINER_NAME}" bash -lc \
                 "chown $(id -u):$(id -g) /var/www/html/custom/plugins/PaynlPaymentShopware6/tests/Acceptance /var/www/html/custom/plugins/PaynlPaymentShopware6/tests/Acceptance/.env" \
                 >/dev/null 2>&1 || true
             lock_env_file
