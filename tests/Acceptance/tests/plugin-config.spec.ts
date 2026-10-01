@@ -1,5 +1,5 @@
 import { expect, test } from '@shopware-ag/acceptance-test-suite';
-import type { Page, Response } from '@playwright/test';
+import type { Browser, Page, Response } from '@playwright/test';
 
 const SUCCESS_TEXT = /correct credentials|link erfolgreich|koppeling geslaagd|paynlValidation\.messages\.correctCredentials/i;
 
@@ -29,43 +29,86 @@ function configInput(page: Page, name: string, label: string) {
     return page.locator(`input[name="${name}"], input[aria-label*="${label}"]`).first();
 }
 
+function adminBaseUrl(): string {
+    if (process.env.ADMIN_URL) {
+        return process.env.ADMIN_URL.endsWith('/') ? process.env.ADMIN_URL : `${process.env.ADMIN_URL}/`;
+    }
+
+    const appUrl = process.env.APP_URL || '';
+    expect(appUrl, 'APP_URL must be set').toBeTruthy();
+    return `${appUrl.replace(/\/$/, '')}/admin/`;
+}
+
+async function openAdmin(browser: Browser): Promise<Page> {
+    const context = await browser.newContext({
+        baseURL: adminBaseUrl(),
+        ignoreHTTPSErrors: true,
+    });
+    const page = await context.newPage();
+    await context.addInitScript(() => {
+        const style = document.createElement('style');
+        style.textContent = '.sf-toolbar, .sf-toolbar-block { display: none !important; }';
+        document.documentElement.appendChild(style);
+    });
+
+    const username = process.env.SHOPWARE_ADMIN_USERNAME || 'admin';
+    const password = process.env.SHOPWARE_ADMIN_PASSWORD || 'shopware';
+    await page.goto('./#/login', { waitUntil: 'domcontentloaded' });
+
+    const usernameField = page.getByRole('textbox', { name: /username|email address|benutzername|e-mailadresse|gebruikersnaam/i });
+    await expect(usernameField).toBeVisible({ timeout: 60_000 });
+    await usernameField.fill(username);
+    await page.getByLabel(/password|passwort|wachtwoord/i).fill(password);
+    await page.getByRole('button', { name: /log in|anmelden|inloggen/i }).click();
+    await page.waitForURL((url) => {
+        const hash = url.hash.toLowerCase();
+        return hash.startsWith('#/') && !hash.includes('login');
+    }, { timeout: 60_000 });
+
+    return page;
+}
+
 test.describe('PAY. plugin config', () => {
-    test('Test API Keys connects with the sales location', async ({ AdminPage }) => {
+    test('Test API Keys connects with the sales location', async ({ browser }) => {
         const credentials = payCredentials();
+        const adminPage = await openAdmin(browser);
 
-        await step(AdminPage, 'Open the PAY. configuration screen', async () => {
-            await AdminPage.addStyleTag({
-                content: '.sf-toolbar, .sf-toolbar-block { display: none !important; }',
-            }).catch(() => undefined);
-            await AdminPage.goto('./#/sw/extension/config/PaynlPaymentShopware6');
-            await expect(AdminPage).toHaveURL(/extension\/config\/PaynlPaymentShopware6/);
-            await expect(configInput(AdminPage, 'PaynlPaymentShopware6.config.tokenCode', 'Token-Code')).toBeVisible();
-        });
+        try {
+            await step(adminPage, 'Open the PAY. configuration screen', async () => {
+                await adminPage.goto('./#/sw/extension/config/PaynlPaymentShopware6');
+                await expect(adminPage).toHaveURL(/extension\/config\/PaynlPaymentShopware6/);
+                await expect(configInput(adminPage, 'PaynlPaymentShopware6.config.tokenCode', 'Token-Code')).toBeVisible({
+                    timeout: 60_000,
+                });
+            });
 
-        await step(AdminPage, 'Fill Token-Code, API-token and Service-ID', async () => {
-            await configInput(AdminPage, 'PaynlPaymentShopware6.config.tokenCode', 'Token-Code').fill(credentials.tokenCode);
-            await configInput(AdminPage, 'PaynlPaymentShopware6.config.apiToken', 'API-token').fill(credentials.apiToken);
-            await configInput(AdminPage, 'PaynlPaymentShopware6.config.serviceId', 'Service-ID').fill(credentials.serviceId);
-        });
+            await step(adminPage, 'Fill Token-Code, API-token and Service-ID', async () => {
+                await configInput(adminPage, 'PaynlPaymentShopware6.config.tokenCode', 'Token-Code').fill(credentials.tokenCode);
+                await configInput(adminPage, 'PaynlPaymentShopware6.config.apiToken', 'API-token').fill(credentials.apiToken);
+                await configInput(adminPage, 'PaynlPaymentShopware6.config.serviceId', 'Service-ID').fill(credentials.serviceId);
+            });
 
-        const connection = await step(AdminPage, 'Click Test API Keys', async () => {
-            const responsePromise = AdminPage.waitForResponse(
-                (response) => response.url().includes('/paynl/test-api-keys') && response.request().method() === 'POST',
-                { timeout: 60_000 },
-            );
-            await AdminPage.getByRole('button', { name: /test api keys|api-schlüssel testen|test api sleutel/i }).click();
-            return responsePromise;
-        });
+            const connection = await step(adminPage, 'Click Test API Keys', async () => {
+                const responsePromise = adminPage.waitForResponse(
+                    (response) => response.url().includes('/paynl/test-api-keys') && response.request().method() === 'POST',
+                    { timeout: 60_000 },
+                );
+                await adminPage.getByRole('button', { name: /test api keys|api-schlüssel testen|test api sleutel/i }).click();
+                return responsePromise;
+            });
 
-        await step(AdminPage, 'Confirm the connection succeeded', async () => {
-            const payload = await readConnectionResponse(connection);
-            expect(payload.success, payload.message || 'Test API Keys did not return a successful response').toBe(true);
-            expect(payload.message).toBe('paynlValidation.messages.correctCredentials');
+            await step(adminPage, 'Confirm the connection succeeded', async () => {
+                const payload = await readConnectionResponse(connection);
+                expect(payload.success, payload.message || 'Test API Keys did not return a successful response').toBe(true);
+                expect(payload.message).toBe('paynlValidation.messages.correctCredentials');
 
-            const notifications = AdminPage.locator('.sw-notifications');
-            await expect(notifications).toBeVisible();
-            await expect(notifications).toContainText(SUCCESS_TEXT);
-        });
+                const notifications = adminPage.locator('.sw-notifications');
+                await expect(notifications).toBeVisible();
+                await expect(notifications).toContainText(SUCCESS_TEXT);
+            });
+        } finally {
+            await adminPage.context().close();
+        }
     });
 });
 
