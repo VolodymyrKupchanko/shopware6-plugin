@@ -122,7 +122,7 @@ test.describe('PAY. checkout', () => {
         });
     });
 
-    test('iDEAL production checkout reaches the thank you page', async ({
+    test('iDEAL checkout reaches the thank you page', async ({
         StorefrontPage,
         StorefrontProductDetail,
         StorefrontCheckoutConfirm,

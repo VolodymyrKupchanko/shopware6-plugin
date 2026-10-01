@@ -323,7 +323,7 @@ export async function assignIdealPaymentMethod(
 ): Promise<PayPaymentMethod> {
     const methods = await syncPayPaymentMethods(
         adminApi,
-        { testMode: false, useSinglePaymentMethod: false },
+        { testMode: true, useSinglePaymentMethod: false },
         (installed) => installed.some((method) => method.active && method.paynlId === IDEAL_PAYNL_ID),
     );
     const selected = methods.find((method) => method.paynlId === IDEAL_PAYNL_ID);
