@@ -64,7 +64,7 @@ async function selectAmericanEnglish(page: Page): Promise<void> {
     if (!href) {
         throw new Error(`American English sandbox link has no href at ${page.url()}`);
     }
-    await page.goto(href, { waitUntil: 'domcontentloaded' });
+    await page.goto(new URL(href, page.url()).href, { waitUntil: 'domcontentloaded' });
     await expect(page).toHaveURL(ENGLISH_SANDBOX);
 }
 
