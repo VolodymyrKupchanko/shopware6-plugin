@@ -6,31 +6,45 @@ type SalesChannelPaymentAssigner = {
     assignSalesChannelPaymentMethod(salesChannelId: string, paymentMethodId: string): Promise<unknown>;
 };
 
+export const IDEAL_PAYNL_ID = '10';
+
 export type PayPaymentMethod = {
     id: string;
     name: string;
+    paynlId: string;
 };
 
 type SearchResponse<T> = {
     data: T[];
 };
 
+type PaynlCustomFields = {
+    paynlId?: number | string | null;
+};
+
 type PaymentMethodRecord = PayPaymentMethod & {
     active?: boolean;
-    translated?: { name?: string };
+    customFields?: PaynlCustomFields;
+    translated?: { name?: string; customFields?: PaynlCustomFields };
     attributes?: {
         name?: string;
         active?: boolean;
-        translated?: { name?: string };
+        customFields?: PaynlCustomFields;
+        translated?: { name?: string; customFields?: PaynlCustomFields };
         handlerIdentifier?: string;
     };
 };
 
 function mapPaymentMethod(method: PaymentMethodRecord): PayPaymentMethod & { active: boolean } {
     const attributes = method.attributes ?? method;
+    const paynlId = attributes.customFields?.paynlId
+        ?? attributes.translated?.customFields?.paynlId
+        ?? method.translated?.customFields?.paynlId;
+
     return {
         id: method.id,
         name: attributes.name || attributes.translated?.name || method.name || '',
+        paynlId: paynlId === undefined || paynlId === null || paynlId === '' ? '' : String(paynlId),
         active: Boolean(attributes.active),
     };
 }
@@ -51,7 +65,7 @@ export async function findPayPaymentMethods(
     }
 
     const response = await adminApi.post('./search/payment-method', {
-        data: { limit: 50, filter },
+        data: { limit: 500, filter },
     });
 
     expect(response.ok(), `Payment method search failed: ${response.status()} ${await response.text()}`).toBeTruthy();
@@ -59,7 +73,12 @@ export async function findPayPaymentMethods(
     return (payload.data ?? []).map(mapPaymentMethod);
 }
 
-async function writePayTestConfig(adminApi: AdminApiContext): Promise<void> {
+type PayPluginConfig = {
+    testMode: boolean;
+    useSinglePaymentMethod: boolean;
+};
+
+async function writePayPluginConfig(adminApi: AdminApiContext, config: PayPluginConfig): Promise<void> {
     const tokenCode = process.env.PAY_TOKEN_CODE || '';
     const apiToken = process.env.PAY_API_TOKEN || '';
     const serviceId = process.env.PAY_SERVICE_ID || '';
@@ -70,13 +89,16 @@ async function writePayTestConfig(adminApi: AdminApiContext): Promise<void> {
             'PaynlPaymentShopware6.config.tokenCode': tokenCode,
             'PaynlPaymentShopware6.config.apiToken': apiToken,
             'PaynlPaymentShopware6.config.serviceId': serviceId,
-            'PaynlPaymentShopware6.config.testMode': true,
-            'PaynlPaymentShopware6.config.useSinglePaymentMethod': true,
+            'PaynlPaymentShopware6.config.testMode': config.testMode,
+            'PaynlPaymentShopware6.config.useSinglePaymentMethod': config.useSinglePaymentMethod,
             'PaynlPaymentShopware6.config.logging': true,
             'PaynlPaymentShopware6.config.paymentScreenLanguage': 'en',
         },
     });
     expect(response.ok(), `Could not write PAY. config: ${response.status()} ${await response.text()}`).toBeTruthy();
+
+    const cache = await adminApi.delete('./_action/cache');
+    expect(cache.ok(), `Could not clear the shop cache: ${cache.status()} ${await cache.text()}`).toBeTruthy();
 }
 
 async function assertPluginInstalled(adminApi: AdminApiContext): Promise<void> {
@@ -127,22 +149,72 @@ async function installPayPaymentMethods(adminApi: AdminApiContext): Promise<void
     expect(payload.success !== false, payload.message || 'install-payment-methods failed').toBeTruthy();
 }
 
-async function ensurePayPaymentMethods(adminApi: AdminApiContext): Promise<Array<PayPaymentMethod & { active: boolean }>> {
+function asBool(value: unknown): boolean {
+    return value === true || value === 1 || value === '1';
+}
+
+async function readPayPluginConfig(adminApi: AdminApiContext): Promise<PayPluginConfig> {
+    const response = await adminApi.get('./_action/system-config?domain=PaynlPaymentShopware6.config');
+    expect(response.ok(), `Could not read PAY. config: ${response.status()} ${await response.text()}`).toBeTruthy();
+    const payload = (await response.json()) as Record<string, unknown>;
+    return {
+        testMode: asBool(payload['PaynlPaymentShopware6.config.testMode']),
+        useSinglePaymentMethod: asBool(payload['PaynlPaymentShopware6.config.useSinglePaymentMethod']),
+    };
+}
+
+async function ensureMethodActive(
+    adminApi: AdminApiContext,
+    method: PayPaymentMethod & { active: boolean },
+): Promise<void> {
+    if (method.active) {
+        return;
+    }
+
+    const activate = await adminApi.patch(`./payment-method/${method.id}`, { data: { active: true } });
+    expect(activate.ok(), `Could not activate ${method.name}: ${activate.status()}`).toBeTruthy();
+    method.active = true;
+}
+
+async function syncPayPaymentMethods(
+    adminApi: AdminApiContext,
+    config: PayPluginConfig,
+    isReady: (methods: Array<PayPaymentMethod & { active: boolean }>) => boolean,
+): Promise<Array<PayPaymentMethod & { active: boolean }>> {
     await assertPluginInstalled(adminApi);
+    const current = await readPayPluginConfig(adminApi);
+    const configMatches = current.testMode === config.testMode
+        && current.useSinglePaymentMethod === config.useSinglePaymentMethod;
     let methods = await findPayPaymentMethods(adminApi, false);
-    if (methods.length === 0) {
-        await writePayTestConfig(adminApi);
+
+    if (!configMatches || !isReady(methods)) {
+        if (!configMatches) {
+            await writePayPluginConfig(adminApi, config);
+        }
         await installPayPaymentMethods(adminApi);
         methods = await findPayPaymentMethods(adminApi, false);
     }
 
-    for (const method of methods.filter((item) => !item.active)) {
-        const activate = await adminApi.patch(`./payment-method/${method.id}`, { data: { active: true } });
-        expect(activate.ok(), `Could not activate ${method.name}: ${activate.status()}`).toBeTruthy();
-        method.active = true;
-    }
+    return methods;
+}
 
-    return methods.filter((method) => method.active);
+async function setSalesChannelPaymentMethod(
+    adminApi: AdminApiContext,
+    testDataService: SalesChannelPaymentAssigner,
+    salesChannelId: string,
+    paymentMethodId: string,
+): Promise<void> {
+    await testDataService.assignSalesChannelPaymentMethod(salesChannelId, paymentMethodId);
+
+    const patchResponse = await adminApi.patch(`./sales-channel/${salesChannelId}`, {
+        data: {
+            paymentMethodId,
+        },
+    });
+    expect(
+        patchResponse.ok(),
+        `Could not set the sales channel payment method: ${patchResponse.status()} ${await patchResponse.text()}`,
+    ).toBeTruthy();
 }
 
 type DomainRecord = {
@@ -214,18 +286,22 @@ export async function assignPayPaymentMethod(
     salesChannelId: string,
     preferredName = process.env.PAY_PAYMENT_METHOD || 'Pay by PAY.',
 ): Promise<PayPaymentMethod> {
-    const methods = await ensurePayPaymentMethods(adminApi);
-    expect(
-        methods.length,
-        'No PAY. payment methods found. Install and activate PaynlPaymentShopware6, then retry.',
-    ).toBeGreaterThan(0);
-
     const wanted = preferredName === 'Pay by PAY.'
         ? ['Pay by PAY.', 'Mit PAY. bezahlen', 'Betalen met PAY.']
         : [preferredName];
     const matches = (name: string): boolean => wanted.some((candidate) => (
         name === candidate || name.toLowerCase().includes(candidate.toLowerCase())
     ));
+    const methods = await syncPayPaymentMethods(
+        adminApi,
+        { testMode: true, useSinglePaymentMethod: true },
+        (installed) => installed.some((method) => method.active && matches(method.name)),
+    );
+    expect(
+        methods.length,
+        'No PAY. payment methods found. Install and activate PaynlPaymentShopware6, then retry.',
+    ).toBeGreaterThan(0);
+
     const selected = methods.find((method) => matches(method.name))
         ?? (methods.length === 1 ? methods[0] : undefined);
     if (!selected) {
@@ -234,14 +310,33 @@ export async function assignPayPaymentMethod(
         );
     }
 
-    await testDataService.assignSalesChannelPaymentMethod(salesChannelId, selected.id);
+    await ensureMethodActive(adminApi, selected);
+    await setSalesChannelPaymentMethod(adminApi, testDataService, salesChannelId, selected.id);
 
-    const patchResponse = await adminApi.patch(`./sales-channel/${salesChannelId}`, {
-        data: {
-            paymentMethodId: selected.id,
-        },
-    });
-    expect(patchResponse.ok(), `Could not set default PAY. method: ${patchResponse.status()} ${await patchResponse.text()}`).toBeTruthy();
+    return selected;
+}
+
+export async function assignIdealPaymentMethod(
+    adminApi: AdminApiContext,
+    testDataService: SalesChannelPaymentAssigner,
+    salesChannelId: string,
+): Promise<PayPaymentMethod> {
+    const methods = await syncPayPaymentMethods(
+        adminApi,
+        { testMode: false, useSinglePaymentMethod: false },
+        (installed) => installed.some((method) => method.active && method.paynlId === IDEAL_PAYNL_ID),
+    );
+    const selected = methods.find((method) => method.paynlId === IDEAL_PAYNL_ID);
+    if (!selected) {
+        throw new Error(
+            `No active PAY. method with paynlId ${IDEAL_PAYNL_ID} (iDEAL). Active methods: ${
+                methods.map((method) => `${method.name} (${method.paynlId || 'no id'})`).join(', ')
+            }`,
+        );
+    }
+
+    await ensureMethodActive(adminApi, selected);
+    await setSalesChannelPaymentMethod(adminApi, testDataService, salesChannelId, selected.id);
 
     return selected;
 }
