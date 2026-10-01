@@ -96,10 +96,11 @@ wait_for_dockware_ready() {
     while true; do
         if docker logs "${CONTAINER_NAME}" 2>&1 | grep -q 'container IS READY'; then
             log "Dockware reports the container is ready"
-            # Dockware chowns the bind mount. Give the host user ownership back
-            # so .env stays mode 600 instead of world-readable.
+            # Dockware chowns the bind mount. Take back only this directory and .env.
+            # A recursive chown hits node_modules, which Docker Desktop rejects.
             docker exec "${CONTAINER_NAME}" bash -lc \
-                "chown -R $(id -u):$(id -g) /var/www/html/custom/plugins/PaynlPaymentShopware6/tests/Acceptance"
+                "chown $(id -u):$(id -g) /var/www/html/custom/plugins/PaynlPaymentShopware6/tests/Acceptance /var/www/html/custom/plugins/PaynlPaymentShopware6/tests/Acceptance/.env" \
+                >/dev/null 2>&1 || true
             lock_env_file
             if [[ -f "${ENV_FILE}" && ! -O "${ENV_FILE}" ]]; then
                 fail "Could not restore ownership of ${ENV_FILE}; refusing to loosen its permissions"
