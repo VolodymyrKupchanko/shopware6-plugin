@@ -66,8 +66,30 @@ async function openAdmin(browser: Browser): Promise<Page> {
         const hash = url.hash.toLowerCase();
         return hash.startsWith('#/') && !hash.includes('login');
     }, { timeout: 60_000 });
+    await dismissAdminPopups(page);
 
     return page;
+}
+
+async function dismissAdminPopups(page: Page): Promise<void> {
+    const updatePopup = page.locator('div').filter({
+        hasText: /a new shopware version|eine neue shopware-version/i,
+        has: page.getByRole('button', { name: /^(cancel|abbrechen)$/i }),
+    }).last();
+    if (await updatePopup.isVisible().catch(() => false)) {
+        await updatePopup.getByRole('button', { name: /^(cancel|abbrechen)$/i }).click();
+        await expect(updatePopup).toBeHidden();
+    }
+
+    const consentHeading = page.getByRole('heading', {
+        name: /help us to improve shopware|hilf uns dabei, shopware zu verbessern/i,
+    });
+    if (await consentHeading.isVisible().catch(() => false)) {
+        await page.getByRole('button', {
+            name: /^(reject all|alle ablehnen|decline|ablehnen)$/i,
+        }).click();
+        await expect(consentHeading).toBeHidden();
+    }
 }
 
 test.describe('PAY. plugin config', () => {
@@ -82,6 +104,7 @@ test.describe('PAY. plugin config', () => {
                 await expect(configInput(adminPage, 'PaynlPaymentShopware6.config.tokenCode', 'Token-Code')).toBeVisible({
                     timeout: 60_000,
                 });
+                await dismissAdminPopups(adminPage);
             });
 
             await step(adminPage, 'Fill Token-Code, API-token and Service-ID', async () => {
@@ -91,6 +114,7 @@ test.describe('PAY. plugin config', () => {
             });
 
             const connection = await step(adminPage, 'Click Test API Keys', async () => {
+                await dismissAdminPopups(adminPage);
                 const responsePromise = adminPage.waitForResponse(
                     (response) => response.url().includes('/paynl/test-api-keys') && response.request().method() === 'POST',
                     { timeout: 60_000 },
