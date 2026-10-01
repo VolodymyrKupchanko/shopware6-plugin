@@ -58,8 +58,10 @@ async function openAdmin(browser: Browser): Promise<Page> {
     const usernameField = page.getByRole('textbox', { name: /username|email address|benutzername|e-mailadresse|gebruikersnaam/i });
     await expect(usernameField).toBeVisible({ timeout: 60_000 });
     await usernameField.fill(username);
-    await page.getByLabel(/password|passwort|wachtwoord/i).fill(password);
-    await page.getByRole('button', { name: /log in|anmelden|inloggen/i }).click();
+    await page.getByRole('textbox', { name: /^(password|passwort|wachtwoord)$/i }).fill(password);
+    const loginButton = page.getByRole('button', { name: /^(log in|anmelden|inloggen)$/i });
+    await expect(loginButton).toBeEnabled();
+    await loginButton.click();
     await page.waitForURL((url) => {
         const hash = url.hash.toLowerCase();
         return hash.startsWith('#/') && !hash.includes('login');
