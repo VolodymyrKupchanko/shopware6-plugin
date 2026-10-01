@@ -313,12 +313,20 @@ configure_shopware() {
 cd /var/www/html
 if [[ -f .env ]]; then
   grep -q "^APP_URL=" .env && sed -i "s|^APP_URL=.*|APP_URL=${APP_URL_VALUE}|" .env || echo "APP_URL=${APP_URL_VALUE}" >> .env
-  grep -q "^TRUSTED_PROXIES=" .env && sed -i "s|^TRUSTED_PROXIES=.*|TRUSTED_PROXIES=127.0.0.1,REMOTE_ADDR|" .env || echo "TRUSTED_PROXIES=127.0.0.1,REMOTE_ADDR" >> .env
-  if grep -q "^TRUSTED_HEADERS=" .env; then
-    sed -i "s|^TRUSTED_HEADERS=.*|TRUSTED_HEADERS=x-forwarded-for,x-forwarded-host,x-forwarded-proto,x-forwarded-port,x-forwarded-prefix|" .env
-  else
-    echo "TRUSTED_HEADERS=x-forwarded-for,x-forwarded-host,x-forwarded-proto,x-forwarded-port,x-forwarded-prefix" >> .env
-  fi
+  # Port 80 is reached from the Docker bridge, which forwards the tunnel X-Forwarded-Proto.
+  # Shopware 6.7 reads the SYMFONY_TRUSTED_* variables. private_ranges includes that bridge.
+  set_shop_env() {
+    if grep -q "^$1=" .env; then
+      sed -i "s|^$1=.*|$1=$2|" .env
+    else
+      echo "$1=$2" >> .env
+    fi
+  }
+  forwarded_headers="x-forwarded-for,x-forwarded-host,x-forwarded-proto,x-forwarded-port,x-forwarded-prefix"
+  set_shop_env TRUSTED_PROXIES private_ranges
+  set_shop_env TRUSTED_HEADERS "$forwarded_headers"
+  set_shop_env SYMFONY_TRUSTED_PROXIES private_ranges
+  set_shop_env SYMFONY_TRUSTED_HEADERS "$forwarded_headers"
   grep -q "^SHOPWARE_HTTP_CACHE_ENABLED=" .env && sed -i "s|^SHOPWARE_HTTP_CACHE_ENABLED=.*|SHOPWARE_HTTP_CACHE_ENABLED=0|" .env || echo "SHOPWARE_HTTP_CACHE_ENABLED=0" >> .env
 fi
 '
@@ -389,7 +397,7 @@ collect_diagnostics() {
     shopware_exec 'cd /var/www/html
 php bin/console plugin:list -n || true
 echo "---- .env APP_URL ----"
-grep -E "^(APP_URL|TRUSTED_PROXIES)=" .env || true
+grep -E "^(APP_URL|TRUSTED_PROXIES|SYMFONY_TRUSTED_PROXIES)=" .env || true
 echo "---- paynl logs ----"
 ls -la var/log || true
 ' > "${DIAGNOSTICS_DIR}/shopware-console.txt" 2>&1 || true
