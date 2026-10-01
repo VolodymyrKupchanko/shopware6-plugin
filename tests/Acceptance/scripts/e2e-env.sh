@@ -25,10 +25,16 @@ fail() {
     exit 1
 }
 
+lock_env_file() {
+    [[ -f "${ENV_FILE}" && -O "${ENV_FILE}" ]] || return 0
+    chmod 600 "${ENV_FILE}" || fail "Could not restrict ${ENV_FILE} to mode 600"
+}
+
 ensure_env_file() {
     if [[ ! -f "${ENV_FILE}" ]]; then
         cp "${ACCEPTANCE_DIR}/.env.example" "${ENV_FILE}"
     fi
+    lock_env_file
 }
 
 set_env_value() {
@@ -46,6 +52,7 @@ set_env_value() {
     else
         printf '%s=%s\n' "${key}" "${value}" >> "${ENV_FILE}"
     fi
+    lock_env_file
     export "${key}=${value}"
 }
 
@@ -89,9 +96,14 @@ wait_for_dockware_ready() {
     while true; do
         if docker logs "${CONTAINER_NAME}" 2>&1 | grep -q 'container IS READY'; then
             log "Dockware reports the container is ready"
-            # Bind-mount of the plugin is chowned by Dockware; the host/CI user must still write .env and diagnostics.
+            # Dockware chowns the bind mount. Give the host user ownership back
+            # so .env stays mode 600 instead of world-readable.
             docker exec "${CONTAINER_NAME}" bash -lc \
-                'chmod -R a+rwX /var/www/html/custom/plugins/PaynlPaymentShopware6/tests/Acceptance || true'
+                "chown -R $(id -u):$(id -g) /var/www/html/custom/plugins/PaynlPaymentShopware6/tests/Acceptance"
+            lock_env_file
+            if [[ -f "${ENV_FILE}" && ! -O "${ENV_FILE}" ]]; then
+                fail "Could not restore ownership of ${ENV_FILE}; refusing to loosen its permissions"
+            fi
             sleep 3
             return
         fi
@@ -216,8 +228,7 @@ start_tunnel() {
 
     if [[ -n "${NGROK_AUTHTOKEN:-}" ]] && command -v ngrok >/dev/null 2>&1; then
         log "Starting ngrok tunnel to ${target}"
-        ngrok http "${SHOPWARE_PORT}" --request-header-add "X-Forwarded-Proto:https" --log=stdout >"${TUNNEL_LOG}" 2>&1 &
-        echo $! > "${TUNNEL_PID_FILE}"
+        launch_tunnel ngrok http "${SHOPWARE_PORT}" --request-header-add "X-Forwarded-Proto:https" --log=stdout
         local elapsed=0
         while (( elapsed < 45 )); do
             if curl -fsS http://127.0.0.1:4040/api/tunnels >/dev/null 2>&1; then
@@ -233,8 +244,7 @@ print(https[0] if https else "")')"
         done
     elif command -v cloudflared >/dev/null 2>&1; then
         log "Starting cloudflared tunnel to ${target}"
-        cloudflared tunnel --url "${target}" --no-autoupdate >"${TUNNEL_LOG}" 2>&1 &
-        echo $! > "${TUNNEL_PID_FILE}"
+        launch_tunnel cloudflared tunnel --url "${target}" --no-autoupdate
         local elapsed=0
         while (( elapsed < 45 )); do
             public_url="$(grep -oE 'https://[a-z0-9.-]+\.trycloudflare\.com' "${TUNNEL_LOG}" | head -n 1 || true)"
@@ -255,16 +265,23 @@ print(https[0] if https else "")')"
     write_github_env ADMIN_API_URL "http://127.0.0.1:${SHOPWARE_PORT}/"
 }
 
+launch_tunnel() {
+    # New session so stop_tunnel can signal this tunnel without touching any other.
+    python3 -c 'import os,sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' "$@" >"${TUNNEL_LOG}" 2>&1 &
+    echo $! > "${TUNNEL_PID_FILE}"
+}
+
 stop_tunnel() {
-    if [[ -f "${TUNNEL_PID_FILE}" ]]; then
-        local pid
-        pid="$(cat "${TUNNEL_PID_FILE}")"
-        kill "${pid}" >/dev/null 2>&1 || true
-        wait "${pid}" 2>/dev/null || true
-        rm -f "${TUNNEL_PID_FILE}"
+    if [[ ! -f "${TUNNEL_PID_FILE}" ]]; then
+        return
     fi
-    pkill -f 'cloudflared tunnel' >/dev/null 2>&1 || true
-    pkill -f 'ngrok http' >/dev/null 2>&1 || true
+    local pid
+    pid="$(cat "${TUNNEL_PID_FILE}")"
+    if [[ -n "${pid}" ]] && kill -0 "${pid}" >/dev/null 2>&1; then
+        kill -- "-${pid}" >/dev/null 2>&1 || kill "${pid}" >/dev/null 2>&1 || true
+        wait "${pid}" 2>/dev/null || true
+    fi
+    rm -f "${TUNNEL_PID_FILE}"
 }
 
 install_plugin_sdk() {
@@ -391,16 +408,27 @@ cmd_down() {
     log "Temporary Shopware environment removed"
 }
 
+cmd_redact() {
+    if [[ -f "${ENV_FILE}" ]]; then
+        load_env_file
+    fi
+    python3 "${SCRIPT_DIR}/redact-secrets.py" \
+        "${ACCEPTANCE_DIR}/test-results" \
+        "${ACCEPTANCE_DIR}/playwright-report" \
+        "${ACCEPTANCE_DIR}/diagnostics"
+}
+
 usage() {
     cat <<'EOF'
-Usage: e2e-env.sh <up|down|diagnostics|configure|ensure-plugin|tunnel>
+Usage: e2e-env.sh <up|down|diagnostics|configure|ensure-plugin|tunnel|redact>
 
   up            Start Shopware, open a public HTTPS tunnel, install the plugin
   configure     Re-run plugin/PAY. configuration (requires APP_URL)
   ensure-plugin Install and activate PaynlPaymentShopware6, then PAY. test methods
   tunnel        Start only the public HTTPS tunnel
   diagnostics   Copy Shopware logs for CI artifacts
-  down          Stop the tunnel and delete the Shopware containers
+  redact        Strip PAY. credentials from test artifacts
+  down          Stop this run's tunnel and delete the Shopware containers
 EOF
 }
 
@@ -411,5 +439,6 @@ case "${1:-}" in
     configure) load_env_file; configure_shopware ;;
     ensure-plugin) load_env_file; configure_shopware ;;
     tunnel) load_env_file; start_tunnel ;;
+    redact) cmd_redact ;;
     *) usage; exit 1 ;;
 esac

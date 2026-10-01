@@ -80,6 +80,11 @@ async function fillSandboxForm(page: Page, amount: string): Promise<void> {
 
     const secretInput = secretField(page);
     await expect(secretInput, `Secret field #secret was not shown at ${page.url()}`).toBeVisible({ timeout: 30_000 });
+    await secretInput.evaluate((element) => {
+        if (element instanceof HTMLInputElement) {
+            element.type = 'password';
+        }
+    });
     await secretInput.fill(secret);
 
     const paid = page.locator('input#captured');

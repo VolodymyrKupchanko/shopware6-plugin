@@ -101,8 +101,14 @@ jobs:
         working-directory: tests/Acceptance
         run: bash scripts/e2e-env.sh diagnostics
 
+      - name: Redact secrets from test artifacts
+        id: redact
+        if: always() && !cancelled()
+        working-directory: tests/Acceptance
+        run: bash scripts/e2e-env.sh redact
+
       - name: Upload report, screenshots, and logs
-        if: ${{ !cancelled() }}
+        if: always() && !cancelled() && steps.redact.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: playwright-pay-checkout

@@ -33,6 +33,7 @@ const isCi = !!process.env.CI;
 export default defineConfig({
     testDir: './tests',
     globalSetup: './global-setup.ts',
+    globalTeardown: './global-teardown.ts',
     fullyParallel: false,
     forbidOnly: isCi,
     retries: isCi ? 1 : 0,
