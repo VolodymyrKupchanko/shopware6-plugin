@@ -44,12 +44,16 @@ async function openAdmin(browser: Browser): Promise<Page> {
         baseURL: adminBaseUrl(),
         ignoreHTTPSErrors: true,
     });
-    const page = await context.newPage();
     await context.addInitScript(() => {
-        const style = document.createElement('style');
-        style.textContent = '.sf-toolbar, .sf-toolbar-block { display: none !important; }';
-        document.documentElement.appendChild(style);
+        const hideProfiler = (): void => {
+            document.querySelectorAll('.sf-toolbar, .sf-minitoolbar, .sf-toolbar-block').forEach((element) => {
+                element.remove();
+            });
+        };
+        hideProfiler();
+        new MutationObserver(hideProfiler).observe(document.documentElement, { childList: true, subtree: true });
     });
+    const page = await context.newPage();
 
     const username = process.env.SHOPWARE_ADMIN_USERNAME || 'admin';
     const password = process.env.SHOPWARE_ADMIN_PASSWORD || 'shopware';
@@ -71,7 +75,16 @@ async function openAdmin(browser: Browser): Promise<Page> {
     return page;
 }
 
+async function hideProfiler(page: Page): Promise<void> {
+    await page.evaluate(() => {
+        document.querySelectorAll('.sf-toolbar, .sf-minitoolbar, .sf-toolbar-block').forEach((element) => {
+            element.remove();
+        });
+    }).catch(() => undefined);
+}
+
 async function dismissAdminPopups(page: Page): Promise<void> {
+    await hideProfiler(page);
     const updatePopup = page.locator('div').filter({
         hasText: /a new shopware version|eine neue shopware-version/i,
         has: page.getByRole('button', { name: /^(cancel|abbrechen)$/i }),
@@ -85,6 +98,7 @@ async function dismissAdminPopups(page: Page): Promise<void> {
         name: /help us to improve shopware|hilf uns dabei, shopware zu verbessern/i,
     });
     if (await consentHeading.isVisible().catch(() => false)) {
+        await hideProfiler(page);
         await page.getByRole('button', {
             name: /^(reject all|alle ablehnen|decline|ablehnen)$/i,
         }).click();
