@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import { expect, type Page } from '@playwright/test';
 
 const PAY_HOST = /pay\.nl|achterelkebetaling\.nl|payments\.nl/i;
@@ -121,13 +122,56 @@ export async function completePaySandbox(page: Page, amount: string): Promise<vo
     await page.waitForURL(/checkout\/finish|PaynlPayment\/finalize-transaction/i, { timeout: 60_000 });
 }
 
+function normalizeDecimal(raw: string): string {
+    const numeric = raw.replace(/[^\d,.-]/g, '');
+    const lastComma = numeric.lastIndexOf(',');
+    const lastDot = numeric.lastIndexOf('.');
+
+    if (lastComma >= 0 && lastDot >= 0) {
+        return lastComma > lastDot
+            ? numeric.replaceAll('.', '').replace(',', '.')
+            : numeric.replaceAll(',', '');
+    }
+
+    if (lastComma < 0 && lastDot < 0) {
+        return numeric;
+    }
+
+    const separator = lastComma >= 0 ? ',' : '.';
+    const parts = numeric.split(separator);
+    const fraction = parts.at(-1) ?? '';
+    const decimal = parts.length === 2 && fraction.length > 0 && fraction.length <= 2;
+    if (!decimal) {
+        return parts.join('');
+    }
+
+    return separator === ',' ? `${parts[0]}.${fraction}` : numeric;
+}
+
 export function parseAmount(raw: string): { amount: number; currency: string; sandboxAmount: string } {
     const currencyMatch = raw.match(/[€£$]|EUR|GBP|USD/i);
     const currency = currencyMatch?.[0]?.replace('€', 'EUR').replace('£', 'GBP').replace('$', 'USD').toUpperCase() ?? 'EUR';
-    const numeric = raw.replace(/[^0-9,.-]/g, '').replace(',', '.');
+    const amount = Number.parseFloat(normalizeDecimal(raw));
     return {
-        amount: Number.parseFloat(numeric),
+        amount,
         currency: currency === 'EUR' || currency === 'GBP' || currency === 'USD' ? currency : 'EUR',
-        sandboxAmount: Number.parseFloat(numeric).toFixed(2),
+        sandboxAmount: amount.toFixed(2),
     };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+    const cases: Array<[string, number]> = [
+        ['€ 10.00', 10],
+        ['€ 10,00', 10],
+        ['1.234,56', 1234.56],
+        ['1,234.56', 1234.56],
+        ['1.234', 1234],
+    ];
+    for (const [raw, expected] of cases) {
+        const parsed = parseAmount(raw);
+        if (parsed.amount !== expected || parsed.sandboxAmount !== expected.toFixed(2)) {
+            throw new Error(`parseAmount(${JSON.stringify(raw)}) => ${parsed.amount} / ${parsed.sandboxAmount}`);
+        }
+    }
+    console.log('parseAmount self-check ok');
 }

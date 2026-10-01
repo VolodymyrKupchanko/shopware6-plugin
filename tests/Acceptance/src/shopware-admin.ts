@@ -220,10 +220,19 @@ export async function assignPayPaymentMethod(
         'No PAY. payment methods found. Install and activate PaynlPaymentShopware6, then retry.',
     ).toBeGreaterThan(0);
 
-    const selected =
-        methods.find((method) => method.name === preferredName)
-        ?? methods.find((method) => method.name.toLowerCase().includes(preferredName.toLowerCase()))
-        ?? methods[0];
+    const wanted = preferredName === 'Pay by PAY.'
+        ? ['Pay by PAY.', 'Mit PAY. bezahlen', 'Betalen met PAY.']
+        : [preferredName];
+    const matches = (name: string): boolean => wanted.some((candidate) => (
+        name === candidate || name.toLowerCase().includes(candidate.toLowerCase())
+    ));
+    const selected = methods.find((method) => matches(method.name))
+        ?? (methods.length === 1 ? methods[0] : undefined);
+    if (!selected) {
+        throw new Error(
+            `No PAY. payment method named "${preferredName}". Active methods: ${methods.map((method) => method.name).join(', ')}`,
+        );
+    }
 
     await testDataService.assignSalesChannelPaymentMethod(salesChannelId, selected.id);
 
