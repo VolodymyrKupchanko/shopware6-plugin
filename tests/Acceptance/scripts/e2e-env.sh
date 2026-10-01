@@ -418,10 +418,30 @@ cmd_redact() {
     if [[ -f "${ENV_FILE}" ]]; then
         load_env_file
     fi
-    python3 "${SCRIPT_DIR}/redact-secrets.py" \
-        "${ACCEPTANCE_DIR}/test-results" \
-        "${ACCEPTANCE_DIR}/playwright-report" \
+    local php_script="${SCRIPT_DIR}/redact-secrets.php"
+    local -a roots=(
+        "${ACCEPTANCE_DIR}/test-results"
+        "${ACCEPTANCE_DIR}/playwright-report"
         "${ACCEPTANCE_DIR}/diagnostics"
+    )
+    if command -v php >/dev/null 2>&1; then
+        php "${php_script}" "${roots[@]}"
+        return
+    fi
+
+    # GitHub-hosted runners have no PHP. The Shopware container does, and these directories are bind-mounted.
+    local acceptance="/var/www/html/custom/plugins/PaynlPaymentShopware6/tests/Acceptance"
+    docker exec -u "$(id -u):$(id -g)" \
+        -e PAY_SANDBOX_SECRET="${PAY_SANDBOX_SECRET:-}" \
+        -e PAY_API_TOKEN="${PAY_API_TOKEN:-}" \
+        -e PAY_TOKEN_CODE="${PAY_TOKEN_CODE:-}" \
+        -e PAY_SERVICE_ID="${PAY_SERVICE_ID:-}" \
+        -e NGROK_AUTHTOKEN="${NGROK_AUTHTOKEN:-}" \
+        "${CONTAINER_NAME}" \
+        php "${acceptance}/scripts/redact-secrets.php" \
+        "${acceptance}/test-results" \
+        "${acceptance}/playwright-report" \
+        "${acceptance}/diagnostics"
 }
 
 usage() {
