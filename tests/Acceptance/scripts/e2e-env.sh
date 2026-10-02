@@ -292,23 +292,33 @@ stop_tunnel() {
 
 build_plugin_administration() {
     log "Installing PaynlPaymentShopware6 npm dependencies and building the administration"
+    # Shopware 6.7 Vite writes plugin admin assets into the plugin, then assets:install publishes them.
     shopware_exec 'set -e
 cd /var/www/html
-if grep -Rqs "paynl-config-section-api" public/administration 2>/dev/null; then
+PLUGIN=custom/plugins/PaynlPaymentShopware6
+ADMIN_OUT="$PLUGIN/src/Resources/public/administration"
+PUBLIC_OUT=public/bundles/paynlpaymentshopware6/administration
+if grep -Rqs "paynl-config-section-api" "$ADMIN_OUT" "$PUBLIC_OUT" 2>/dev/null; then
   echo "Administration already includes paynl-config-section-api"
   exit 0
 fi
-STOREFRONT=custom/plugins/PaynlPaymentShopware6/src/Resources/app/storefront
+STOREFRONT=$PLUGIN/src/Resources/app/storefront
 if [[ -f "$STOREFRONT/package-lock.json" ]]; then
   npm ci --prefix "$STOREFRONT" --no-audit --no-fund
 elif [[ -f "$STOREFRONT/package.json" ]]; then
   npm install --prefix "$STOREFRONT" --no-audit --no-fund
 fi
 export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}"
+php bin/console bundle:dump
 bin/build-administration.sh
+php bin/console assets:install
 php bin/console cache:clear -n
-grep -Rqs "paynl-config-section-api" public/administration \
-  || { echo "Administration build did not include paynl-config-section-api"; exit 1; }
+if ! grep -Rqs "paynl-config-section-api" "$ADMIN_OUT" "$PUBLIC_OUT" 2>/dev/null; then
+  echo "Administration build did not include paynl-config-section-api"
+  echo "---- built administration files ----"
+  find "$ADMIN_OUT" "$PUBLIC_OUT" -type f 2>/dev/null | head -n 40 || true
+  exit 1
+fi
 '
 }
 
