@@ -290,6 +290,28 @@ stop_tunnel() {
     rm -f "${TUNNEL_PID_FILE}"
 }
 
+build_plugin_administration() {
+    log "Installing PaynlPaymentShopware6 npm dependencies and building the administration"
+    shopware_exec 'set -e
+cd /var/www/html
+if grep -Rqs "paynl-config-section-api" public/administration 2>/dev/null; then
+  echo "Administration already includes paynl-config-section-api"
+  exit 0
+fi
+STOREFRONT=custom/plugins/PaynlPaymentShopware6/src/Resources/app/storefront
+if [[ -f "$STOREFRONT/package-lock.json" ]]; then
+  npm ci --prefix "$STOREFRONT" --no-audit --no-fund
+elif [[ -f "$STOREFRONT/package.json" ]]; then
+  npm install --prefix "$STOREFRONT" --no-audit --no-fund
+fi
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}"
+bin/build-administration.sh
+php bin/console cache:clear -n
+grep -Rqs "paynl-config-section-api" public/administration \
+  || { echo "Administration build did not include paynl-config-section-api"; exit 1; }
+'
+}
+
 install_plugin_sdk() {
     log "Installing paynl/php-sdk into Shopware so the plugin requirement check passes"
     shopware_exec 'set -e
@@ -348,6 +370,8 @@ php bin/console plugin:list -n | awk "/PaynlPaymentShopware6/" | grep -q "Yes" \
   || { echo "PaynlPaymentShopware6 is not installed"; php bin/console plugin:list -n; exit 1; }
 php bin/console cache:clear -n
 '
+
+    build_plugin_administration
 
     log "Writing PAY. test-mode credentials"
     docker exec \
@@ -458,7 +482,7 @@ Usage: e2e-env.sh <up|down|diagnostics|configure|ensure-plugin|tunnel|redact>
 
   up            Start Shopware, open a public HTTPS tunnel, install the plugin
   configure     Re-run plugin/PAY. configuration (requires APP_URL)
-  ensure-plugin Install and activate PaynlPaymentShopware6, then PAY. test methods
+  ensure-plugin Install and activate PaynlPaymentShopware6, build its administration, then PAY. test methods
   tunnel        Start only the public HTTPS tunnel
   diagnostics   Copy Shopware logs for CI artifacts
   redact        Strip PAY. credentials from test artifacts
