@@ -209,10 +209,11 @@ wait_for_shopware() {
 }
 
 admin_token() {
-    local base_url="${ADMIN_API_URL:-http://127.0.0.1:${SHOPWARE_PORT}/}"
+    local base_url="${ADMIN_API_URL:?ADMIN_API_URL is not set}"
     base_url="${base_url%/}"
     curl -fsS -X POST "${base_url}/api/oauth/token" \
         -H 'Content-Type: application/json' \
+        -H 'ngrok-skip-browser-warning: true' \
         -d "$(printf '{"client_id":"administration","grant_type":"password","username":"%s","password":"%s"}' \
             "${SHOPWARE_ADMIN_USERNAME:-admin}" "${SHOPWARE_ADMIN_PASSWORD:-shopware}")" \
         | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])'
@@ -265,10 +266,11 @@ print(https[0] if https else "")')"
     [[ -n "${public_url}" ]] || fail "Could not determine the public tunnel URL. See ${TUNNEL_LOG}"
     public_url="${public_url%/}/"
     log "Public shop URL: ${public_url}"
+    # Both hosts must match. Shopware builds administration asset URLs from the API host.
     set_env_value APP_URL "${public_url}"
-    set_env_value ADMIN_API_URL "http://127.0.0.1:${SHOPWARE_PORT}/"
+    set_env_value ADMIN_API_URL "${public_url}"
     write_github_env APP_URL "${public_url}"
-    write_github_env ADMIN_API_URL "http://127.0.0.1:${SHOPWARE_PORT}/"
+    write_github_env ADMIN_API_URL "${public_url}"
 }
 
 launch_tunnel() {
@@ -405,12 +407,13 @@ php bin/console cache:clear -n
     log "Installing PAY. payment methods"
     local token
     token="$(admin_token)"
-    local api_url="${ADMIN_API_URL:-http://127.0.0.1:${SHOPWARE_PORT}/}"
+    local api_url="${ADMIN_API_URL:?ADMIN_API_URL is not set}"
     api_url="${api_url%/}"
     local response
     response="$(curl -fsS "${api_url}/api/paynl/install-payment-methods?_nocache=$(date +%s)" \
         -H "Authorization: Bearer ${token}" \
         -H 'Accept: application/json' \
+        -H 'ngrok-skip-browser-warning: true' \
         -H 'Cache-Control: no-cache, no-store' \
         -H 'Pragma: no-cache')"
     python3 -c 'import json,sys
