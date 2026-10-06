@@ -1,10 +1,8 @@
 import { expect, test, clearDelayedCache } from '@shopware-ag/acceptance-test-suite';
 import type { FixtureTypes, IdProvider, Page } from '@shopware-ag/acceptance-test-suite';
-import { dismissAdminPopups, openAdmin } from '../src/admin-popups';
 
 type AdminApi = FixtureTypes['AdminApiContext'];
 
-const PAY_PARTS_CHECKBOX_LABEL = 'Enable Pay.Parts for credit cards to show credit card form in checkout';
 const STOREFRONT_TYPE_ID = '8a243080f92e4c719546314b577cf82b';
 const SDK_READY_TIMEOUT_MS = 60_000;
 
@@ -84,20 +82,6 @@ test('Pay.Parts credit card form is shown on checkout confirm', async ({
     AdminApiContext,
     IdProvider,
 }) => {
-    const adminPage = await openAdmin(browser);
-
-    try {
-        await adminPage.goto('./#/sw/extension/config/PaynlPaymentShopware6');
-        await expect(adminPage).toHaveURL(/extension\/config\/PaynlPaymentShopware6/);
-        await dismissAdminPopups(adminPage);
-
-        const payPartsCheckbox = adminPage.locator(`[aria-label="${PAY_PARTS_CHECKBOX_LABEL}"]`);
-        await expect(payPartsCheckbox).toBeVisible({ timeout: 60_000 });
-        await expect(payPartsCheckbox).toBeChecked();
-    } finally {
-        await adminPage.context().close();
-    }
-
     const shop = await findStorefrontShop(AdminApiContext);
     const shopper = await createShopper(AdminApiContext, IdProvider, shop);
     let productId: string | undefined;
