@@ -293,15 +293,20 @@ stop_tunnel() {
 }
 
 build_plugin_administration() {
-    log "Installing PaynlPaymentShopware6 npm dependencies and building the administration"
+    log "Building the PaynlPaymentShopware6 administration before tests"
     # Shopware 6.7 Vite writes plugin admin assets into the plugin, then assets:install publishes them.
+    # A previous bundle that already contains paynl-config-section-api is not current: config.xml
+    # and administration sources can change after that component was first compiled.
     shopware_exec 'set -e
 cd /var/www/html
 PLUGIN=custom/plugins/PaynlPaymentShopware6
+ADMIN_SRC="$PLUGIN/src/Resources/app/administration"
 ADMIN_OUT="$PLUGIN/src/Resources/public/administration"
 PUBLIC_OUT=public/bundles/paynlpaymentshopware6/administration
-if grep -Rqs "paynl-config-section-api" "$ADMIN_OUT" "$PUBLIC_OUT" 2>/dev/null; then
-  echo "Administration already includes paynl-config-section-api"
+STAMP="$ADMIN_OUT/.source-stamp"
+SOURCE_STAMP="$(find "$ADMIN_SRC" "$PLUGIN/src/Resources/config/config.xml" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d" " -f1)"
+if [[ -f "$STAMP" && "$(cat "$STAMP")" == "$SOURCE_STAMP" ]] && grep -Rqs "paynl-config-section-api" "$ADMIN_OUT" "$PUBLIC_OUT" 2>/dev/null; then
+  echo "Administration already built from the current plugin sources"
   exit 0
 fi
 STOREFRONT=$PLUGIN/src/Resources/app/storefront
@@ -321,6 +326,7 @@ if ! grep -Rqs "paynl-config-section-api" "$ADMIN_OUT" "$PUBLIC_OUT" 2>/dev/null
   find "$ADMIN_OUT" "$PUBLIC_OUT" -type f 2>/dev/null | head -n 40 || true
   exit 1
 fi
+printf "%s\n" "$SOURCE_STAMP" > "$STAMP"
 '
 }
 
