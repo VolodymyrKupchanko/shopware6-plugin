@@ -5,20 +5,20 @@ const NOTIFICATION_CLOSE = '.sw-alert__close, .sw-notification__close, .mt-banne
 export async function dismissAdminPopups(page: Page): Promise<void> {
     await hideProfiler(page);
 
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-        if (await dismissShopwareUpdate(page) || await dismissUsageConsent(page)) {
-            continue;
-        }
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+        const closedUpdate = await dismissShopwareUpdate(page);
+        const closedConsent = await dismissUsageConsent(page);
+        if (!closedUpdate && !closedConsent) {
+            const closeButton = page.locator(NOTIFICATION_CLOSE).locator('visible=true').first();
+            if (!await closeButton.isVisible().catch(() => false)) {
+                return;
+            }
 
-        const closeButton = page.locator(NOTIFICATION_CLOSE).locator('visible=true').first();
-        if (!await closeButton.isVisible().catch(() => false)) {
-            return;
-        }
-
-        // Dashboard banners animate while statistics load, so a normal click waits out actionTimeout.
-        await closeButton.click({ force: true, timeout: 2_000 }).catch(() => undefined);
-        if (await closeButton.isVisible().catch(() => false)) {
-            await removeBanner(closeButton);
+            // Dashboard banners animate while statistics load, so a normal click waits out actionTimeout.
+            await closeButton.click({ force: true, timeout: 2_000 }).catch(() => undefined);
+            if (await closeButton.isVisible().catch(() => false)) {
+                await removeBanner(closeButton);
+            }
         }
     }
 }
@@ -71,7 +71,7 @@ function adminBaseUrl(): string {
 
 async function dismissShopwareUpdate(page: Page): Promise<boolean> {
     const updatePopup = page.locator('div').filter({
-        hasText: /a new shopware version|eine neue shopware-version/i,
+        has: page.getByRole('heading', { name: /a new shopware version|eine neue shopware-version/i }),
         has: page.getByRole('button', { name: /^(cancel|abbrechen)$/i }),
     }).last();
 
@@ -81,28 +81,38 @@ async function dismissShopwareUpdate(page: Page): Promise<boolean> {
 
     const cancel = updatePopup.getByRole('button', { name: /^(cancel|abbrechen)$/i });
     await cancel.click({ force: true, timeout: 2_000 }).catch(() => undefined);
-    await updatePopup.waitFor({ state: 'hidden', timeout: 3_000 }).catch(() => undefined);
     if (await updatePopup.isVisible().catch(() => false)) {
-        await removeBanner(cancel);
+        await updatePopup.evaluate((element) => element.remove()).catch(() => undefined);
     }
     return true;
 }
 
 async function dismissUsageConsent(page: Page): Promise<boolean> {
-    const consentHeading = page.getByRole('heading', {
-        name: /help us to improve shopware|hilf uns dabei, shopware zu verbessern/i,
-    });
+    const consentModal = page.locator('.sw-modal, [role="dialog"]').filter({
+        has: page.getByRole('heading', {
+            name: /help us to improve shopware|hilf uns dabei, shopware zu verbessern/i,
+        }),
+    }).last();
 
-    if (!await consentHeading.isVisible().catch(() => false)) {
+    if (!await consentModal.isVisible().catch(() => false)) {
         return false;
     }
 
-    await hideProfiler(page);
-    const reject = page.getByRole('button', {
-        name: /^(reject all|alle ablehnen|decline|ablehnen)$/i,
+    const reject = consentModal.getByRole('button', {
+        name: /^(reject all|alle ablehnen|alles afwijzen)$/i,
     });
-    await reject.click({ force: true, timeout: 2_000 }).catch(() => undefined);
-    await consentHeading.waitFor({ state: 'hidden', timeout: 3_000 }).catch(() => undefined);
+    if (await reject.count() > 0) {
+        await reject.click({ force: true, timeout: 2_000 }).catch(() => undefined);
+    }
+
+    if (await consentModal.isVisible().catch(() => false)) {
+        await consentModal.evaluate((element) => {
+            element.remove();
+            document.querySelectorAll('.sw-modal-backdrop, .sw-modal__backdrop').forEach((backdrop) => {
+                backdrop.remove();
+            });
+        }).catch(() => undefined);
+    }
     return true;
 }
 

@@ -37,9 +37,9 @@ test.describe('PAY. plugin config', () => {
 
         try {
             await step(adminPage, 'Open the PAY. configuration screen', async () => {
-                await dismissAdminPopups(adminPage);
                 await adminPage.goto('./#/sw/extension/config/PaynlPaymentShopware6');
                 await expect(adminPage).toHaveURL(/extension\/config\/PaynlPaymentShopware6/);
+                await dismissAdminPopups(adminPage);
                 await expect(configInput(adminPage, 'PaynlPaymentShopware6.config.tokenCode', 'Token-Code')).toBeVisible({
                     timeout: 60_000,
                 });

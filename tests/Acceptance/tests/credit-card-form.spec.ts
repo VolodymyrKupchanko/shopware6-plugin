@@ -87,9 +87,9 @@ test('Pay.Parts credit card form is shown on checkout confirm', async ({
     const adminPage = await openAdmin(browser);
 
     try {
-        await dismissAdminPopups(adminPage);
         await adminPage.goto('./#/sw/extension/config/PaynlPaymentShopware6');
         await expect(adminPage).toHaveURL(/extension\/config\/PaynlPaymentShopware6/);
+        await dismissAdminPopups(adminPage);
 
         const payPartsCheckbox = adminPage.locator(`[aria-label="${PAY_PARTS_CHECKBOX_LABEL}"]`);
         await expect(payPartsCheckbox).toBeVisible({ timeout: 60_000 });
