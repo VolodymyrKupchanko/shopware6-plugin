@@ -1,5 +1,6 @@
 import { expect, test, clearDelayedCache } from '@shopware-ag/acceptance-test-suite';
 import type { FixtureTypes, IdProvider, Page } from '@shopware-ag/acceptance-test-suite';
+import { dismissAdminPopups } from '../src/admin-popups';
 
 type AdminApi = FixtureTypes['AdminApiContext'];
 
@@ -84,6 +85,7 @@ test('Pay.Parts credit card form is shown on checkout confirm', async ({
     AdminApiContext,
     IdProvider,
 }) => {
+    await dismissAdminPopups(ShopAdmin.page);
     await ShopAdmin.goesTo('#/sw/extension/config/PaynlPaymentShopware6');
 
     const payPartsCheckbox = ShopAdmin.page.locator(`[aria-label="${PAY_PARTS_CHECKBOX_LABEL}"]`);

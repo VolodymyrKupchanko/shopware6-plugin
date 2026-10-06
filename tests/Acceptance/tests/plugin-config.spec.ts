@@ -1,5 +1,6 @@
 import { expect, test } from '@shopware-ag/acceptance-test-suite';
 import type { Browser, Page, Response } from '@playwright/test';
+import { dismissAdminPopups } from '../src/admin-popups';
 
 const SUCCESS_TEXT = /correct credentials|link erfolgreich|koppeling geslaagd|paynlValidation\.messages\.correctCredentials/i;
 
@@ -75,37 +76,6 @@ async function openAdmin(browser: Browser): Promise<Page> {
     return page;
 }
 
-async function hideProfiler(page: Page): Promise<void> {
-    await page.evaluate(() => {
-        document.querySelectorAll('.sf-toolbar, .sf-minitoolbar, .sf-toolbar-block').forEach((element) => {
-            element.remove();
-        });
-    }).catch(() => undefined);
-}
-
-async function dismissAdminPopups(page: Page): Promise<void> {
-    await hideProfiler(page);
-    const updatePopup = page.locator('div').filter({
-        hasText: /a new shopware version|eine neue shopware-version/i,
-        has: page.getByRole('button', { name: /^(cancel|abbrechen)$/i }),
-    }).last();
-    if (await updatePopup.isVisible().catch(() => false)) {
-        await updatePopup.getByRole('button', { name: /^(cancel|abbrechen)$/i }).click();
-        await expect(updatePopup).toBeHidden();
-    }
-
-    const consentHeading = page.getByRole('heading', {
-        name: /help us to improve shopware|hilf uns dabei, shopware zu verbessern/i,
-    });
-    if (await consentHeading.isVisible().catch(() => false)) {
-        await hideProfiler(page);
-        await page.getByRole('button', {
-            name: /^(reject all|alle ablehnen|decline|ablehnen)$/i,
-        }).click();
-        await expect(consentHeading).toBeHidden();
-    }
-}
-
 test.describe('PAY. plugin config', () => {
     test('Test API Keys connects with the sales location', async ({ browser }) => {
         const credentials = payCredentials();
@@ -113,12 +83,12 @@ test.describe('PAY. plugin config', () => {
 
         try {
             await step(adminPage, 'Open the PAY. configuration screen', async () => {
+                await dismissAdminPopups(adminPage);
                 await adminPage.goto('./#/sw/extension/config/PaynlPaymentShopware6');
                 await expect(adminPage).toHaveURL(/extension\/config\/PaynlPaymentShopware6/);
                 await expect(configInput(adminPage, 'PaynlPaymentShopware6.config.tokenCode', 'Token-Code')).toBeVisible({
                     timeout: 60_000,
                 });
-                await dismissAdminPopups(adminPage);
             });
 
             await step(adminPage, 'Fill Token-Code, API-token and Service-ID', async () => {
