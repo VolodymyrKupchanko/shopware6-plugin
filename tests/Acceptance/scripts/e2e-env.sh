@@ -305,7 +305,7 @@ ADMIN_OUT="$PLUGIN/src/Resources/public/administration"
 PUBLIC_OUT=public/bundles/paynlpaymentshopware6/administration
 STAMP="$ADMIN_OUT/.source-stamp"
 SOURCE_STAMP="$(find "$ADMIN_SRC" "$PLUGIN/src/Resources/config/config.xml" -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d" " -f1)"
-if [[ -f "$STAMP" && "$(cat "$STAMP")" == "$SOURCE_STAMP" ]] && grep -Rqs "paynl-config-section-api" "$ADMIN_OUT" "$PUBLIC_OUT" 2>/dev/null; then
+if [[ -f "$STAMP" && "$(cat "$STAMP")" == "$SOURCE_STAMP" ]] && grep -Rqs "paynl-config-pay-parts" "$ADMIN_OUT" "$PUBLIC_OUT" 2>/dev/null; then
   echo "Administration already built from the current plugin sources"
   exit 0
 fi
@@ -320,8 +320,8 @@ php bin/console bundle:dump
 bin/build-administration.sh
 php bin/console assets:install
 php bin/console cache:clear -n
-if ! grep -Rqs "paynl-config-section-api" "$ADMIN_OUT" "$PUBLIC_OUT" 2>/dev/null; then
-  echo "Administration build did not include paynl-config-section-api"
+if ! grep -Rqs "paynl-config-pay-parts" "$ADMIN_OUT" "$PUBLIC_OUT" 2>/dev/null; then
+  echo "Administration build did not include paynl-config-pay-parts"
   echo "---- built administration files ----"
   find "$ADMIN_OUT" "$PUBLIC_OUT" -type f 2>/dev/null | head -n 40 || true
   exit 1
@@ -405,6 +405,7 @@ php bin/console system:config:set PaynlPaymentShopware6.config.serviceId "$PAY_S
 php bin/console system:config:set PaynlPaymentShopware6.config.testMode 1 -n
 php bin/console system:config:set PaynlPaymentShopware6.config.useSinglePaymentMethod 1 -n
 php bin/console system:config:set PaynlPaymentShopware6.config.logging 1 -n
+php bin/console system:config:set PaynlPaymentShopware6.config.enablePayPartsCreditCardWidget 1 -n
 php bin/console system:config:set PaynlPaymentShopware6.config.paymentScreenLanguage en -n
 php bin/console system:config:set core.loginRegistration.minPasswordLength 8 -n
 php bin/console cache:clear -n
