@@ -8,6 +8,23 @@ type SalesChannelPaymentAssigner = {
 
 export const IDEAL_PAYNL_ID = '10';
 
+/** Preference order matches PaynlPaymentMethodsIdsEnum::getPayPartsCardPaymentIds(). */
+export const PAY_PARTS_CARD_PAYNL_IDS = [
+    '11',
+    '706',
+    '3141',
+    '3138',
+    '708',
+    '2268',
+    '710',
+    '711',
+    '712',
+    '715',
+    '1705',
+    '1939',
+    '1945',
+] as const;
+
 export type PayPaymentMethod = {
     id: string;
     name: string;
@@ -76,6 +93,7 @@ export async function findPayPaymentMethods(
 type PayPluginConfig = {
     testMode: boolean;
     useSinglePaymentMethod: boolean;
+    enablePayPartsCreditCardWidget?: boolean;
 };
 
 async function writePayPluginConfig(adminApi: AdminApiContext, config: PayPluginConfig): Promise<void> {
@@ -93,6 +111,11 @@ async function writePayPluginConfig(adminApi: AdminApiContext, config: PayPlugin
             'PaynlPaymentShopware6.config.useSinglePaymentMethod': config.useSinglePaymentMethod,
             'PaynlPaymentShopware6.config.logging': true,
             'PaynlPaymentShopware6.config.paymentScreenLanguage': 'en',
+            ...(config.enablePayPartsCreditCardWidget === undefined
+                ? {}
+                : {
+                    'PaynlPaymentShopware6.config.enablePayPartsCreditCardWidget': config.enablePayPartsCreditCardWidget,
+                }),
         },
     });
     expect(response.ok(), `Could not write PAY. config: ${response.status()} ${await response.text()}`).toBeTruthy();
@@ -160,6 +183,7 @@ async function readPayPluginConfig(adminApi: AdminApiContext): Promise<PayPlugin
     return {
         testMode: asBool(payload['PaynlPaymentShopware6.config.testMode']),
         useSinglePaymentMethod: asBool(payload['PaynlPaymentShopware6.config.useSinglePaymentMethod']),
+        enablePayPartsCreditCardWidget: asBool(payload['PaynlPaymentShopware6.config.enablePayPartsCreditCardWidget']),
     };
 }
 
@@ -184,7 +208,9 @@ async function syncPayPaymentMethods(
     await assertPluginInstalled(adminApi);
     const current = await readPayPluginConfig(adminApi);
     const configMatches = current.testMode === config.testMode
-        && current.useSinglePaymentMethod === config.useSinglePaymentMethod;
+        && current.useSinglePaymentMethod === config.useSinglePaymentMethod
+        && (config.enablePayPartsCreditCardWidget === undefined
+            || current.enablePayPartsCreditCardWidget === config.enablePayPartsCreditCardWidget);
     let methods = await findPayPaymentMethods(adminApi, false);
 
     if (!configMatches || !isReady(methods)) {
@@ -278,6 +304,56 @@ export async function ensureStorefrontDomainAliases(
     }
 
     await adminApi.delete('./_action/cache').catch(() => undefined);
+}
+
+export async function preparePayPartsCardCheckout(
+    adminApi: AdminApiContext,
+    salesChannelId: string,
+): Promise<PayPaymentMethod> {
+    const methods = await syncPayPaymentMethods(
+        adminApi,
+        { testMode: true, useSinglePaymentMethod: false, enablePayPartsCreditCardWidget: true },
+        (installed) => installed.some((method) => method.active && isPayPartsCardPaynlId(method.paynlId)),
+    );
+    const selected = PAY_PARTS_CARD_PAYNL_IDS
+        .map((paynlId) => methods.find((method) => method.paynlId === paynlId))
+        .find((method) => method !== undefined);
+
+    if (selected === undefined) {
+        throw new Error(
+            `No PAY. card method for Pay.Parts. Active methods: ${
+                methods.map((method) => `${method.name} (${method.paynlId || 'no id'})`).join(', ')
+            }`,
+        );
+    }
+
+    await ensureMethodActive(adminApi, selected);
+    const assignResponse = await adminApi.post('./_action/sync', {
+        data: {
+            'write-sales-channel-payment-method': {
+                entity: 'sales_channel_payment_method',
+                action: 'upsert',
+                payload: [{ salesChannelId, paymentMethodId: selected.id }],
+            },
+        },
+    });
+    expect(
+        assignResponse.ok(),
+        `Could not assign the card method to the sales channel: ${assignResponse.status()} ${await assignResponse.text()}`,
+    ).toBeTruthy();
+    const patchResponse = await adminApi.patch(`./sales-channel/${salesChannelId}`, {
+        data: { paymentMethodId: selected.id },
+    });
+    expect(
+        patchResponse.ok(),
+        `Could not set the sales channel payment method: ${patchResponse.status()} ${await patchResponse.text()}`,
+    ).toBeTruthy();
+
+    return selected;
+}
+
+function isPayPartsCardPaynlId(paynlId: string): boolean {
+    return (PAY_PARTS_CARD_PAYNL_IDS as readonly string[]).includes(paynlId);
 }
 
 export async function assignPayPaymentMethod(

@@ -1,5 +1,6 @@
 import { expect, test, clearDelayedCache } from '@shopware-ag/acceptance-test-suite';
 import type { FixtureTypes, IdProvider, Page } from '@shopware-ag/acceptance-test-suite';
+import { preparePayPartsCardCheckout } from '../src/shopware-admin';
 
 type AdminApi = FixtureTypes['AdminApiContext'];
 
@@ -83,7 +84,11 @@ test('Pay.Parts credit card form is shown on checkout confirm', async ({
     IdProvider,
 }) => {
     const shop = await findStorefrontShop(AdminApiContext);
-    const shopper = await createShopper(AdminApiContext, IdProvider, shop);
+    const cardMethod = await preparePayPartsCardCheckout(AdminApiContext, shop.salesChannelId);
+    const shopper = await createShopper(AdminApiContext, IdProvider, {
+        ...shop,
+        paymentMethodId: cardMethod.id,
+    });
     let productId: string | undefined;
 
     try {
