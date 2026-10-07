@@ -8,6 +8,9 @@ type SalesChannelPaymentAssigner = {
 
 export const IDEAL_PAYNL_ID = '10';
 
+/** Id used by the uniform "Pay by PAY." method, not an installed sales-location method. */
+const SINGLE_PAYNL_ID = '123456789';
+
 /** Preference order matches PaynlPaymentMethodsIdsEnum::getPayPartsCardPaymentIds(). */
 export const PAY_PARTS_CARD_PAYNL_IDS = [
     '11',
@@ -354,6 +357,30 @@ export async function preparePayPartsCardCheckout(
 
 function isPayPartsCardPaynlId(paynlId: string): boolean {
     return (PAY_PARTS_CARD_PAYNL_IDS as readonly string[]).includes(paynlId);
+}
+
+export async function installIndividualPayPaymentMethods(
+    adminApi: AdminApiContext,
+    testDataService: SalesChannelPaymentAssigner,
+    salesChannelId: string,
+): Promise<PayPaymentMethod[]> {
+    const methods = await syncPayPaymentMethods(
+        adminApi,
+        { testMode: true, useSinglePaymentMethod: false },
+        (installed) => installed.some((method) => method.active && isInstalledPaynlId(method.paynlId)),
+    );
+    const installed = methods.filter((method) => method.active && isInstalledPaynlId(method.paynlId));
+    expect(
+        installed.length,
+        'No individual PAY. payment methods were installed.',
+    ).toBeGreaterThan(0);
+    await setSalesChannelPaymentMethod(adminApi, testDataService, salesChannelId, installed[0].id);
+
+    return installed;
+}
+
+function isInstalledPaynlId(paynlId: string): boolean {
+    return paynlId !== '' && paynlId !== SINGLE_PAYNL_ID;
 }
 
 export async function assignPayPaymentMethod(

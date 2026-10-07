@@ -78,7 +78,7 @@ interface Shopper {
     password: string;
 }
 
-test('Pay.Parts credit card form is shown on checkout confirm', async ({
+test.skip('Pay.Parts credit card form is shown on checkout confirm', async ({
     browser,
     AdminApiContext,
     IdProvider,

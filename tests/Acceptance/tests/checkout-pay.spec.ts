@@ -5,6 +5,7 @@ import {
     assignPayPaymentMethod,
     ensureStorefrontDomainAliases,
     IDEAL_PAYNL_ID,
+    installIndividualPayPaymentMethods,
     waitForPaidOrder,
 } from '../src/shopware-admin';
 import { completePaySandbox, parseAmount } from '../src/pay-sandbox';
@@ -231,6 +232,74 @@ test.describe('PAY. checkout', () => {
             );
 
             expect(order.transactions[0].stateMachineState.technicalName).toBe('paid');
+        });
+    });
+
+    test('installed payment methods show logo images on checkout confirm', async ({
+        StorefrontPage,
+        StorefrontProductDetail,
+        StorefrontCheckoutConfirm,
+        ProductData,
+        DefaultSalesChannel,
+        AdminApiContext,
+        TestDataService,
+        ShopCustomer,
+        Register,
+    }) => {
+        test.setTimeout(300_000);
+
+        const methods = await step(StorefrontPage, 'Install PAY. payment methods', () => installIndividualPayPaymentMethods(
+            AdminApiContext,
+            TestDataService,
+            DefaultSalesChannel.salesChannel.id,
+        ));
+
+        await step(StorefrontPage, 'Open the storefront', async () => {
+            await ensureStorefrontDomainAliases(
+                AdminApiContext,
+                DefaultSalesChannel.url,
+                DefaultSalesChannel.salesChannel.id,
+            );
+            await prepareStorefront(StorefrontPage);
+            await StorefrontPage.goto('./', { waitUntil: 'domcontentloaded' });
+        });
+
+        await step(StorefrontPage, 'Add the product and go to checkout', async () => {
+            await ShopCustomer.goesTo(`detail/${ProductData.id}`);
+            await addProductToCart(StorefrontPage);
+            await StorefrontProductDetail.offCanvasCartGoToCheckoutButton.click();
+            await StorefrontPage.waitForURL(/checkout\/(register|confirm)/);
+        });
+
+        await step(StorefrontPage, 'Register as a guest', async () => {
+            if (!StorefrontPage.url().includes('/checkout/register')) {
+                return;
+            }
+
+            await enableGuestCheckout(StorefrontPage);
+            const guest = !(await isPasswordRequired(StorefrontPage));
+            await ShopCustomer.attemptsTo(Register({ isGuest: guest, password: 'shopware' }));
+            await StorefrontPage.waitForURL(/checkout\/confirm/, { timeout: 30_000 });
+        });
+
+        await step(StorefrontPage, 'Check each payment method logo', async () => {
+            await expect(StorefrontPage).toHaveURL(/checkout\/confirm/);
+            await expect(StorefrontCheckoutConfirm.headline).toBeVisible();
+
+            for (const method of methods) {
+                const label = StorefrontPage.locator(`label.payment-method-label[for="paymentMethod${method.id}"]`);
+                await expect(label, `${method.name} is missing from checkout confirm`).toBeVisible();
+
+                const logo = label.locator('> img');
+                await expect(logo, `${method.name} has no logo img inside its payment-method-label`).toHaveCount(1);
+                await logo.scrollIntoViewIfNeeded();
+                await expect(logo, `${method.name} logo is not displayed`).toBeVisible();
+                await expect(logo).toHaveAttribute('src', /\S/);
+                await expect.poll(
+                    () => logo.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0),
+                    { message: `${method.name} logo did not load` },
+                ).toBe(true);
+            }
         });
     });
 });
