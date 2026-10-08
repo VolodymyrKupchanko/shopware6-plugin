@@ -1,5 +1,5 @@
 import { test, expect, type FixtureTypes } from '@shopware-ag/acceptance-test-suite';
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { captureAuthorizedOrder, refundOrder } from '../src/admin-order';
 import { dismissAdminPopups, openAdmin } from '../src/admin-popups';
 import { completePaySandbox, parseAmount, type SandboxPaymentStatus } from '../src/pay-sandbox';
@@ -13,6 +13,8 @@ import {
 import { addProductToCart, enableGuestCheckout, isPasswordRequired, prepareStorefront } from '../src/storefront';
 
 const REFUND_STATUS_CODES = [-72, -81, -82];
+const ALLOW_REFUNDS = /^(allow refunds|erstattungen zulassen|restituties toestaan)$/i;
+const ALLOW_NATIVE_REFUNDS = /^(allow shopware native refunds|shopware native refunds zulassen|shopware native refunds toestaan)$/i;
 
 type CheckoutFixtures = Pick<
     FixtureTypes,
@@ -132,6 +134,44 @@ async function placePayOrder(
     });
 }
 
+async function enableRefundSwitches(page: Page): Promise<void> {
+    await page.goto('./#/sw/extension/config/PaynlPaymentShopware6', { waitUntil: 'domcontentloaded' });
+    await expect(page).toHaveURL(/extension\/config\/PaynlPaymentShopware6/);
+    await dismissAdminPopups(page);
+
+    const allowRefunds = page.getByRole('checkbox', { name: ALLOW_REFUNDS });
+    const nativeRefunds = page.getByRole('checkbox', { name: ALLOW_NATIVE_REFUNDS });
+    await expect(allowRefunds).toBeVisible({ timeout: 60_000 });
+    await expect(nativeRefunds).toBeVisible();
+
+    const allowChanged = await switchOn(allowRefunds);
+    const nativeChanged = await switchOn(nativeRefunds);
+    if (!allowChanged && !nativeChanged) {
+        return;
+    }
+
+    const saved = page.waitForResponse(
+        (response) => response.url().includes('/_action/system-config') && response.request().method() === 'POST',
+        { timeout: 60_000 },
+    );
+    await page.locator('.sw-extension-config__save-action').click();
+    const response = await saved;
+    const body = await response.text();
+    expect(response.ok(), `Could not save plugin config: ${response.status()} ${body}`).toBeTruthy();
+    await expect(allowRefunds).toBeChecked();
+    await expect(nativeRefunds).toBeChecked();
+}
+
+async function switchOn(checkbox: Locator): Promise<boolean> {
+    if (await checkbox.isChecked()) {
+        return false;
+    }
+
+    await checkbox.check({ force: true });
+    await expect(checkbox).toBeChecked();
+    return true;
+}
+
 test.describe('PAY. admin capture and refund', () => {
     test('admin Paid on an authorised payment captures it', async ({
         browser,
@@ -205,31 +245,31 @@ test.describe('PAY. admin capture and refund', () => {
     }) => {
         test.setTimeout(300_000);
 
-        const placed = await placePayOrder({
-            StorefrontPage,
-            StorefrontProductDetail,
-            StorefrontCheckoutConfirm,
-            StorefrontCheckoutFinish,
-            ProductData,
-            DefaultSalesChannel,
-            AdminApiContext,
-            ShopCustomer,
-            Register,
-        }, 'captured');
-
-        const paid = await step(StorefrontPage, 'Wait until the payment is paid', () => waitForOrderPaymentState(
-            AdminApiContext,
-            { orderId: placed.orderId || undefined, orderNumber: placed.orderNumber },
-            'paid',
-        ));
-        const before = await readPaynlTransactionState(AdminApiContext, paid.id);
-        expect(before.stateId).toBe(100);
-
-        await setPayPluginConfig(AdminApiContext, { allowRefunds: true });
-
         const adminPage = await openAdmin(browser);
         try {
             await step(adminPage, 'Close the Shopware consent and update popups', () => dismissAdminPopups(adminPage, 2_000));
+            await step(adminPage, 'Turn on Allow refunds and Allow Shopware native refunds', () => enableRefundSwitches(adminPage));
+
+            const placed = await placePayOrder({
+                StorefrontPage,
+                StorefrontProductDetail,
+                StorefrontCheckoutConfirm,
+                StorefrontCheckoutFinish,
+                ProductData,
+                DefaultSalesChannel,
+                AdminApiContext,
+                ShopCustomer,
+                Register,
+            }, 'captured');
+
+            const paid = await step(StorefrontPage, 'Wait until the payment is paid', () => waitForOrderPaymentState(
+                AdminApiContext,
+                { orderId: placed.orderId || undefined, orderNumber: placed.orderNumber },
+                'paid',
+            ));
+            const before = await readPaynlTransactionState(AdminApiContext, paid.id);
+            expect(before.stateId).toBe(100);
+
             await step(adminPage, 'Refund the order', () => refundOrder(adminPage, paid.id));
 
             const after = await readPaynlTransactionState(AdminApiContext, paid.id);
