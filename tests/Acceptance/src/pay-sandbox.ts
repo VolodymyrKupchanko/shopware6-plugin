@@ -68,7 +68,10 @@ async function selectAmericanEnglish(page: Page): Promise<void> {
     await expect(page).toHaveURL(ENGLISH_SANDBOX);
 }
 
-async function fillSandboxForm(page: Page, amount: string): Promise<void> {
+/** Sandbox radio ids. Authorised is the British spelling used by the PAY. form (status 95). */
+export type SandboxPaymentStatus = 'captured' | 'authorised';
+
+async function fillSandboxForm(page: Page, amount: string, status: SandboxPaymentStatus): Promise<void> {
     const secret = sandboxSecret();
     expect(
         secret,
@@ -88,15 +91,19 @@ async function fillSandboxForm(page: Page, amount: string): Promise<void> {
     });
     await secretInput.fill(secret);
 
-    const paid = page.locator('input#captured');
-    await expect(paid, 'Captured/Paid (#captured) was not shown on the PAY. sandbox').toBeVisible();
-    await paid.check();
+    const statusInput = page.locator(`input[name="paymentStatus"]#${status}`);
+    await expect(statusInput, `Sandbox status #${status} was not shown at ${page.url()}`).toBeVisible();
+    await statusInput.check();
 
-    const amountInput = page.getByPlaceholder(/amount|betrag|bedrag/i)
-        .or(page.getByLabel(/amount|betrag|bedrag/i))
-        .or(page.locator('input[name*="amount" i], input[id*="amount" i]'))
-        .first();
+    const amountInput = page.locator(`input#${status}Amount`);
     if (await amountInput.isVisible().catch(() => false)) {
+        // The selected status keeps its amount input inside a disabled fieldset.
+        await amountInput.evaluate((element) => {
+            element.closest('fieldset')?.removeAttribute('disabled');
+            if (element instanceof HTMLInputElement) {
+                element.disabled = false;
+            }
+        });
         await amountInput.fill(amount);
     }
 
@@ -112,12 +119,16 @@ async function fillSandboxForm(page: Page, amount: string): Promise<void> {
     }
 }
 
-export async function completePaySandbox(page: Page, amount: string): Promise<void> {
+export async function completePaySandbox(
+    page: Page,
+    amount: string,
+    status: SandboxPaymentStatus = 'captured',
+): Promise<void> {
     await page.waitForURL(
         (url) => PAY_HOST.test(url.href) && !ISSUER_HOST.test(url.href),
         { timeout: 60_000 },
     );
-    await fillSandboxForm(page, amount);
+    await fillSandboxForm(page, amount, status);
 
     await page.waitForURL(/checkout\/finish|PaynlPayment\/finalize-transaction/i, { timeout: 60_000 });
 }

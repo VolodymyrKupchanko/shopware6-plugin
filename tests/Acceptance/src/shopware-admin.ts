@@ -128,6 +128,22 @@ async function writePayPluginConfig(adminApi: AdminApiContext, config: PayPlugin
     expect(cache.ok(), `Could not clear the shop cache: ${cache.status()} ${await cache.text()}`).toBeTruthy();
 }
 
+export async function setPayPluginConfig(
+    adminApi: AdminApiContext,
+    values: Record<string, string | boolean>,
+): Promise<void> {
+    const data: Record<string, string | boolean> = {};
+    for (const [key, value] of Object.entries(values)) {
+        data[`PaynlPaymentShopware6.config.${key}`] = value;
+    }
+
+    const response = await adminApi.post('./_action/system-config', { data });
+    expect(response.ok(), `Could not write PAY. config: ${response.status()} ${await response.text()}`).toBeTruthy();
+
+    const cache = await adminApi.delete('./_action/cache');
+    expect(cache.ok(), `Could not clear the shop cache: ${cache.status()} ${await cache.text()}`).toBeTruthy();
+}
+
 async function assertPluginInstalled(adminApi: AdminApiContext): Promise<void> {
     const response = await adminApi.post('./search/plugin', {
         data: {
@@ -455,6 +471,7 @@ export type PaidOrder = {
     orderNumber: string;
     amountTotal: number;
     currency: { isoCode: string };
+    stateMachineState?: { technicalName: string };
     transactions: Array<{
         id: string;
         amount: { totalPrice: number };
@@ -463,10 +480,10 @@ export type PaidOrder = {
     }>;
 };
 
-export async function waitForPaidOrder(
+export async function waitForOrderPaymentState(
     adminApi: AdminApiContext,
     lookup: { orderId?: string; orderNumber?: string | null },
-    expected: { amount: number; currency: string },
+    technicalName: string,
     timeoutMs = Number(process.env.PAY_STATUS_TIMEOUT_MS || 120_000),
 ): Promise<PaidOrder> {
     const deadline = Date.now() + timeoutMs;
@@ -483,6 +500,7 @@ export async function waitForPaidOrder(
                 filter,
                 associations: {
                     currency: {},
+                    stateMachineState: {},
                     transactions: {
                         associations: {
                             stateMachineState: {},
@@ -500,10 +518,7 @@ export async function waitForPaidOrder(
         if (order) {
             const transaction = order.transactions?.[0];
             lastState = transaction?.stateMachineState?.technicalName ?? 'missing-transaction';
-            if (transaction?.stateMachineState?.technicalName === 'paid') {
-                expect(order.currency.isoCode).toBe(expected.currency);
-                expect(order.amountTotal).toBeCloseTo(expected.amount, 2);
-                expect(transaction.amount.totalPrice).toBeCloseTo(expected.amount, 2);
+            if (lastState === technicalName) {
                 return order;
             }
         }
@@ -512,6 +527,49 @@ export async function waitForPaidOrder(
     }
 
     throw new Error(
-        `Shopware transaction for order ${label} did not reach "paid" within ${timeoutMs}ms (last state: ${lastState})`,
+        `Shopware transaction for order ${label} did not reach "${technicalName}" within ${timeoutMs}ms (last state: ${lastState})`,
     );
+}
+
+export async function waitForPaidOrder(
+    adminApi: AdminApiContext,
+    lookup: { orderId?: string; orderNumber?: string | null },
+    expected: { amount: number; currency: string },
+    timeoutMs = Number(process.env.PAY_STATUS_TIMEOUT_MS || 120_000),
+): Promise<PaidOrder> {
+    const order = await waitForOrderPaymentState(adminApi, lookup, 'paid', timeoutMs);
+    const transaction = order.transactions[0];
+    expect(order.currency.isoCode).toBe(expected.currency);
+    expect(order.amountTotal).toBeCloseTo(expected.amount, 2);
+    expect(transaction.amount.totalPrice).toBeCloseTo(expected.amount, 2);
+    return order;
+}
+
+type PaynlTransactionRecord = {
+    stateId?: number | string;
+    paynlTransactionId?: string;
+    attributes?: {
+        stateId?: number | string;
+        paynlTransactionId?: string;
+    };
+};
+
+export async function readPaynlTransactionState(
+    adminApi: AdminApiContext,
+    orderId: string,
+): Promise<{ stateId: number; paynlTransactionId: string }> {
+    const response = await adminApi.post('./search/paynl-transactions', {
+        data: {
+            limit: 1,
+            filter: [{ type: 'equals', field: 'orderId', value: orderId }],
+        },
+    });
+    expect(response.ok(), `PAY. transaction search failed: ${response.status()} ${await response.text()}`).toBeTruthy();
+    const payload = (await response.json()) as SearchResponse<PaynlTransactionRecord>;
+    const row = payload.data[0];
+    const stateId = Number(row?.stateId ?? row?.attributes?.stateId);
+    const paynlTransactionId = row?.paynlTransactionId ?? row?.attributes?.paynlTransactionId ?? '';
+    expect(paynlTransactionId, `No paynl_transactions row for order ${orderId}`).not.toEqual('');
+    expect(Number.isNaN(stateId), `PAY. transaction ${paynlTransactionId} has no stateId`).toBe(false);
+    return { stateId, paynlTransactionId };
 }

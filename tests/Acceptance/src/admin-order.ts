@@ -1,0 +1,69 @@
+import { expect, type Page, type Response } from '@playwright/test';
+import { dismissAdminPopups } from './admin-popups';
+
+export async function captureAuthorizedOrder(page: Page, orderId: string): Promise<void> {
+    await page.goto(`./#/sw/order/detail/${orderId}/general`, { waitUntil: 'domcontentloaded' });
+    await dismissAdminPopups(page);
+
+    const payment = page.locator('.sw-order-general-info__order-state-payment');
+    await expect(payment, 'Payment status select was not shown on the order').toBeVisible({ timeout: 60_000 });
+    await payment.locator('.sw-single-select__selection').click();
+
+    const paid = page.locator('.sw-select-result.sw-select-option--paid');
+    await expect(paid, `Paid was not offered from ${await payment.innerText()}`).toBeVisible();
+    await paid.click();
+
+    const confirm = page.locator('.sw-order-state-change-modal-attach-documents__button');
+    await expect(confirm).toBeVisible();
+    const statusChange = page.waitForResponse(isChangeTransactionStatus, { timeout: 60_000 });
+    await confirm.click();
+
+    const response = await statusChange;
+    const body = await response.text();
+    expect(response.ok(), `Capture status change failed: ${response.status()} ${body}`).toBeTruthy();
+    const payload = JSON.parse(body) as { currentActionName?: string };
+    expect(payload.currentActionName).toBe('paid');
+}
+
+export async function refundOrder(page: Page, orderId: string): Promise<void> {
+    const refundData = page.waitForResponse(isRefundData, { timeout: 60_000 });
+    await page.goto(`./#/paynl/refund/page/view/${orderId}`, { waitUntil: 'domcontentloaded' });
+    await dismissAdminPopups(page);
+
+    const dataResponse = await refundData;
+    const dataBody = await dataResponse.text();
+    expect(dataResponse.ok(), `Refund data failed: ${dataResponse.status()} ${dataBody}`).toBeTruthy();
+    const data = JSON.parse(dataBody) as { availableForRefund?: number | string; errorMessage?: string };
+    expect(data.errorMessage ?? '').toEqual('');
+    expect(Number(data.availableForRefund), 'Nothing is available to refund').toBeGreaterThan(0);
+
+    const shipping = page.getByText(
+        /allow shipping refund|versandrückerstattung zulassen|restitutie van verzendkosten toestaan/i,
+    );
+    if (await shipping.isVisible().catch(() => false)) {
+        await shipping.click();
+    }
+
+    const refundButton = page.locator('.sw-order-detail__smart-bar-save-button');
+    await expect(refundButton).toBeEnabled();
+    const refundResponsePromise = page.waitForResponse(isRefund, { timeout: 60_000 });
+    await refundButton.click();
+
+    const refundResponse = await refundResponsePromise;
+    const refundBody = await refundResponse.text();
+    expect(refundResponse.ok(), `Refund failed: ${refundResponse.status()} ${refundBody}`).toBeTruthy();
+    const messages = JSON.parse(refundBody) as Array<{ type?: string; content?: string }>;
+    expect(messages[0]?.type, messages[0]?.content).toBe('success');
+}
+
+function isChangeTransactionStatus(response: Response): boolean {
+    return response.url().includes('/paynl/change-transaction-status') && response.request().method() === 'POST';
+}
+
+function isRefundData(response: Response): boolean {
+    return response.url().includes('/paynl/get-refund-data') && response.request().method() === 'GET';
+}
+
+function isRefund(response: Response): boolean {
+    return response.url().includes('/paynl/refund') && response.request().method() === 'POST' && !response.url().includes('get-refund-data');
+}
