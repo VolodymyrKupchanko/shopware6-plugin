@@ -32,6 +32,7 @@ export type PayPaymentMethod = {
     id: string;
     name: string;
     paynlId: string;
+    mediaId: string | null;
 };
 
 type SearchResponse<T> = {
@@ -49,6 +50,7 @@ type PaymentMethodRecord = PayPaymentMethod & {
     attributes?: {
         name?: string;
         active?: boolean;
+        mediaId?: string | null;
         customFields?: PaynlCustomFields;
         translated?: { name?: string; customFields?: PaynlCustomFields };
         handlerIdentifier?: string;
@@ -61,10 +63,13 @@ function mapPaymentMethod(method: PaymentMethodRecord): PayPaymentMethod & { act
         ?? attributes.translated?.customFields?.paynlId
         ?? method.translated?.customFields?.paynlId;
 
+    const mediaId = attributes.mediaId || method.mediaId || null;
+
     return {
         id: method.id,
         name: attributes.name || attributes.translated?.name || method.name || '',
         paynlId: paynlId === undefined || paynlId === null || paynlId === '' ? '' : String(paynlId),
+        mediaId,
         active: Boolean(attributes.active),
     };
 }

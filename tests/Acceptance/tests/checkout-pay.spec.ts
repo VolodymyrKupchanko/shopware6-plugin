@@ -235,7 +235,7 @@ test.describe('PAY. checkout', () => {
         });
     });
 
-    test('installed payment methods show logo images on checkout confirm', async ({
+    test('payment methods with a logo show it on checkout confirm', async ({
         StorefrontPage,
         StorefrontProductDetail,
         StorefrontCheckoutConfirm,
@@ -286,12 +286,20 @@ test.describe('PAY. checkout', () => {
             await expect(StorefrontPage).toHaveURL(/checkout\/confirm/);
             await expect(StorefrontCheckoutConfirm.headline).toBeVisible();
 
+            const methodsWithLogo = methods.filter((method) => method.mediaId !== null);
+            expect(methodsWithLogo.length, 'No installed PAY. payment method has a logo').toBeGreaterThan(0);
+
             for (const method of methods) {
                 const label = StorefrontPage.locator(`label.payment-method-label[for="paymentMethod${method.id}"]`);
                 await expect(label, `${method.name} is missing from checkout confirm`).toBeVisible();
 
                 const logo = label.locator('> img');
-                await expect(logo, `${method.name} has no logo img inside its payment-method-label`).toHaveCount(1);
+                if (method.mediaId === null) {
+                    await expect(logo, `${method.name} has no logo, so no img should be shown`).toHaveCount(0);
+                    continue;
+                }
+
+                await expect(logo, `${method.name} has a logo but no img inside its payment-method-label`).toHaveCount(1);
                 await logo.scrollIntoViewIfNeeded();
                 await expect(logo, `${method.name} logo is not displayed`).toBeVisible();
                 await expect(logo).toHaveAttribute('src', /\S/);
