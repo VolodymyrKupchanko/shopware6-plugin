@@ -342,9 +342,20 @@ if [[ -d vendor/php-curl-class ]]; then cp -a vendor/php-curl-class "$PLUGIN/ven
 '
 }
 
+disable_profiler_toolbar() {
+    log "Hiding the Symfony profiler toolbar"
+    # The toolbar covers admin modal buttons. Shopware loads config/packages/dev after web_profiler.yaml.
+    shopware_exec 'set -e
+cd /var/www/html
+mkdir -p config/packages/dev
+printf "%s\n" "web_profiler:" "    toolbar: false" > config/packages/dev/z_e2e_profiler.yaml
+'
+}
+
 configure_shopware() {
     load_env_file
     require_pay_secrets
+    disable_profiler_toolbar
     local app_url="${APP_URL:?APP_URL is not set}"
     app_url="${app_url%/}"
 

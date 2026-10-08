@@ -25,13 +25,27 @@ export async function openAdmin(browser: Browser): Promise<Page> {
         ignoreHTTPSErrors: true,
     });
     await context.addInitScript(() => {
+        const styleId = 'e2e-hide-profiler';
         const hideProfiler = (): void => {
+            const parent = document.head || document.documentElement;
+            if (parent && !document.getElementById(styleId)) {
+                const style = document.createElement('style');
+                style.id = styleId;
+                style.textContent = '.sf-toolbar,.sf-minitoolbar,.sf-toolbar-block{display:none!important;pointer-events:none!important;}';
+                parent.append(style);
+            }
             document.querySelectorAll('.sf-toolbar, .sf-minitoolbar, .sf-toolbar-block').forEach((element) => {
-                element.remove();
+                if (element instanceof HTMLElement) {
+                    element.style.setProperty('display', 'none', 'important');
+                    element.style.setProperty('pointer-events', 'none', 'important');
+                }
             });
         };
         hideProfiler();
-        new MutationObserver(hideProfiler).observe(document.documentElement, { childList: true, subtree: true });
+        const root = document.documentElement;
+        if (root) {
+            new MutationObserver(hideProfiler).observe(root, { childList: true, subtree: true });
+        }
     });
     const page = await context.newPage();
 
@@ -76,7 +90,8 @@ async function dismissShopwareUpdate(page: Page): Promise<boolean> {
     }
 
     const cancel = updatePopup.getByRole('button', { name: /^(cancel|abbrechen|annuleren)$/i });
-    await cancel.click();
+    await hideProfiler(page);
+    await cancel.click({ force: true });
     await expect(updatePopup).toBeHidden();
     return true;
 }
@@ -90,9 +105,10 @@ async function dismissUsageConsent(page: Page): Promise<boolean> {
         return false;
     }
 
+    await hideProfiler(page);
     await consentModal.getByRole('button', {
         name: /^(reject all|alle ablehnen|alles afwijzen)$/i,
-    }).click();
+    }).click({ force: true });
     await expect(consentModal).toBeHidden();
     return true;
 }
@@ -108,9 +124,15 @@ async function removeStrayModalBackdrop(page: Page): Promise<void> {
 }
 
 async function hideProfiler(page: Page): Promise<void> {
+    await page.addStyleTag({
+        content: '.sf-toolbar,.sf-minitoolbar,.sf-toolbar-block{display:none!important;pointer-events:none!important;}',
+    }).catch(() => undefined);
     await page.evaluate(() => {
         document.querySelectorAll('.sf-toolbar, .sf-minitoolbar, .sf-toolbar-block').forEach((element) => {
-            element.remove();
+            if (element instanceof HTMLElement) {
+                element.style.setProperty('display', 'none', 'important');
+                element.style.setProperty('pointer-events', 'none', 'important');
+            }
         });
     }).catch(() => undefined);
 }
