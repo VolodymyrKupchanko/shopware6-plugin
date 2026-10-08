@@ -1,7 +1,7 @@
 import { test, expect, type FixtureTypes } from '@shopware-ag/acceptance-test-suite';
 import type { Page } from '@playwright/test';
 import { captureAuthorizedOrder, refundOrder } from '../src/admin-order';
-import { openAdmin } from '../src/admin-popups';
+import { dismissAdminPopups, openAdmin } from '../src/admin-popups';
 import { completePaySandbox, parseAmount, type SandboxPaymentStatus } from '../src/pay-sandbox';
 import {
     assignPayPaymentMethod,
@@ -173,6 +173,7 @@ test.describe('PAY. admin capture and refund', () => {
 
         const adminPage = await openAdmin(browser);
         try {
+            await step(adminPage, 'Close the Shopware consent and update popups', () => dismissAdminPopups(adminPage, 2_000));
             await step(adminPage, 'Capture by setting the payment to Paid', () => captureAuthorizedOrder(adminPage, authorized.id));
 
             const paid = await step(adminPage, 'Confirm Shopware shows the payment as paid', () => waitForOrderPaymentState(
@@ -228,6 +229,7 @@ test.describe('PAY. admin capture and refund', () => {
 
         const adminPage = await openAdmin(browser);
         try {
+            await step(adminPage, 'Close the Shopware consent and update popups', () => dismissAdminPopups(adminPage, 2_000));
             await step(adminPage, 'Refund the order', () => refundOrder(adminPage, paid.id));
 
             const after = await readPaynlTransactionState(AdminApiContext, paid.id);

@@ -1,26 +1,22 @@
-import { expect, type Browser, type Locator, type Page } from '@playwright/test';
+import { expect, type Browser, type Page } from '@playwright/test';
 
-const NOTIFICATION_CLOSE = '.sw-alert__close, .sw-notification__close, .mt-banner__close, .sw-modal__close';
+const ADMIN_POPUP = /help us to improve shopware|hilf uns dabei, shopware zu verbessern|help ons shopware te verbeteren|a new shopware version|eine neue shopware-version|een nieuwe shopware-versie/i;
 
-export async function dismissAdminPopups(page: Page): Promise<void> {
+export async function dismissAdminPopups(page: Page, waitMs = 8_000): Promise<void> {
     await hideProfiler(page);
+    await page.getByText(ADMIN_POPUP).first()
+        .waitFor({ state: 'visible', timeout: waitMs })
+        .catch(() => undefined);
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
         const closedUpdate = await dismissShopwareUpdate(page);
         const closedConsent = await dismissUsageConsent(page);
         if (!closedUpdate && !closedConsent) {
-            const closeButton = page.locator(NOTIFICATION_CLOSE).locator('visible=true').first();
-            if (!await closeButton.isVisible().catch(() => false)) {
-                return;
-            }
-
-            // Dashboard banners animate while statistics load, so a normal click waits out actionTimeout.
-            await closeButton.click({ force: true, timeout: 2_000 }).catch(() => undefined);
-            if (await closeButton.isVisible().catch(() => false)) {
-                await removeBanner(closeButton);
-            }
+            break;
         }
     }
+
+    await removeStrayModalBackdrop(page);
 }
 
 export async function openAdmin(browser: Browser): Promise<Page> {
@@ -71,54 +67,43 @@ function adminBaseUrl(): string {
 
 async function dismissShopwareUpdate(page: Page): Promise<boolean> {
     const updatePopup = page.locator('div').filter({
-        has: page.getByRole('heading', { name: /a new shopware version|eine neue shopware-version/i }),
-        has: page.getByRole('button', { name: /^(cancel|abbrechen)$/i }),
+        hasText: /a new shopware version|eine neue shopware-version|een nieuwe shopware-versie/i,
+        has: page.getByRole('button', { name: /open update|update öffnen|update openen/i }),
     }).last();
 
     if (!await updatePopup.isVisible().catch(() => false)) {
         return false;
     }
 
-    const cancel = updatePopup.getByRole('button', { name: /^(cancel|abbrechen)$/i });
-    await cancel.click({ force: true, timeout: 2_000 }).catch(() => undefined);
-    if (await updatePopup.isVisible().catch(() => false)) {
-        await updatePopup.evaluate((element) => element.remove()).catch(() => undefined);
-    }
+    const cancel = updatePopup.getByRole('button', { name: /^(cancel|abbrechen|annuleren)$/i });
+    await cancel.click();
+    await expect(updatePopup).toBeHidden();
     return true;
 }
 
 async function dismissUsageConsent(page: Page): Promise<boolean> {
-    const consentModal = page.locator('.sw-modal, [role="dialog"]').filter({
-        has: page.getByRole('heading', {
-            name: /help us to improve shopware|hilf uns dabei, shopware zu verbessern/i,
-        }),
+    const consentModal = page.getByRole('dialog').filter({
+        hasText: /help us to improve shopware|hilf uns dabei, shopware zu verbessern|help ons shopware te verbeteren/i,
     }).last();
 
     if (!await consentModal.isVisible().catch(() => false)) {
         return false;
     }
 
-    const reject = consentModal.getByRole('button', {
+    await consentModal.getByRole('button', {
         name: /^(reject all|alle ablehnen|alles afwijzen)$/i,
-    });
-    if (await reject.count() > 0) {
-        await reject.click({ force: true, timeout: 2_000 }).catch(() => undefined);
-    }
-
-    if (await consentModal.isVisible().catch(() => false)) {
-        await consentModal.evaluate((element) => {
-            element.remove();
-            document.querySelectorAll('.sw-modal-backdrop, .sw-modal__backdrop').forEach((backdrop) => {
-                backdrop.remove();
-            });
-        }).catch(() => undefined);
-    }
+    }).click();
+    await expect(consentModal).toBeHidden();
     return true;
 }
 
-async function removeBanner(control: Locator): Promise<void> {
-    await control.evaluate((element) => {
-        element.closest('.mt-banner, .sw-alert, .sw-modal, .sw-notification')?.remove();
+async function removeStrayModalBackdrop(page: Page): Promise<void> {
+    await page.evaluate(() => {
+        if (document.querySelector('[role="dialog"]')) {
+            return;
+        }
+        document.querySelectorAll('[data-testid="modal-backdrop"], .mt-modal-root__backdrop, .sw-modal-backdrop, .sw-modal__backdrop')
+            .forEach((backdrop) => backdrop.remove());
     }).catch(() => undefined);
 }
 

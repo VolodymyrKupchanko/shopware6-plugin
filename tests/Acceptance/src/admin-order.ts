@@ -44,6 +44,7 @@ export async function refundOrder(page: Page, orderId: string): Promise<void> {
         await shipping.click();
     }
 
+    await dismissAdminPopups(page, 2_000);
     const refundButton = page.locator('.sw-order-detail__smart-bar-save-button');
     await expect(refundButton).toBeEnabled();
     const refundResponsePromise = page.waitForResponse(isRefund, { timeout: 60_000 });
