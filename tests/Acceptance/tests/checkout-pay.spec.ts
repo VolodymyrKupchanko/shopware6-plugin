@@ -34,13 +34,11 @@ test.describe('PAY. checkout', () => {
         ProductData,
         DefaultSalesChannel,
         AdminApiContext,
-        TestDataService,
         ShopCustomer,
         Register,
     }) => {
         const payMethod = await step(StorefrontPage, 'Assign PAY. payment method', () => assignPayPaymentMethod(
             AdminApiContext,
-            TestDataService,
             DefaultSalesChannel.salesChannel.id,
         ));
 
@@ -131,7 +129,6 @@ test.describe('PAY. checkout', () => {
         ProductData,
         DefaultSalesChannel,
         AdminApiContext,
-        TestDataService,
         ShopCustomer,
         Register,
     }) => {
@@ -139,7 +136,6 @@ test.describe('PAY. checkout', () => {
 
         await step(StorefrontPage, 'Turn off the uniform PAY. method and install iDEAL', () => assignIdealPaymentMethod(
             AdminApiContext,
-            TestDataService,
             DefaultSalesChannel.salesChannel.id,
         ));
 
@@ -242,7 +238,6 @@ test.describe('PAY. checkout', () => {
         ProductData,
         DefaultSalesChannel,
         AdminApiContext,
-        TestDataService,
         ShopCustomer,
         Register,
     }) => {
@@ -250,7 +245,6 @@ test.describe('PAY. checkout', () => {
 
         const methods = await step(StorefrontPage, 'Install PAY. payment methods', () => installIndividualPayPaymentMethods(
             AdminApiContext,
-            TestDataService,
             DefaultSalesChannel.salesChannel.id,
         ));
 

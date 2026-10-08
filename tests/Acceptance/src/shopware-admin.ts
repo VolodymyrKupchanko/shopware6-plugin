@@ -2,10 +2,6 @@ import { expect, type FixtureTypes } from '@shopware-ag/acceptance-test-suite';
 
 type AdminApiContext = FixtureTypes['AdminApiContext'];
 
-type SalesChannelPaymentAssigner = {
-    assignSalesChannelPaymentMethod(salesChannelId: string, paymentMethodId: string): Promise<unknown>;
-};
-
 export const IDEAL_PAYNL_ID = '10';
 
 /** Id used by the uniform "Pay by PAY." method, not an installed sales-location method. */
@@ -232,13 +228,35 @@ async function syncPayPaymentMethods(
     return methods;
 }
 
+async function assignSalesChannelPaymentMethods(
+    adminApi: AdminApiContext,
+    salesChannelId: string,
+    paymentMethodIds: string[],
+): Promise<void> {
+    const assignResponse = await adminApi.post('./_action/sync', {
+        data: {
+            'write-sales-channel-payment-method': {
+                entity: 'sales_channel_payment_method',
+                action: 'upsert',
+                payload: paymentMethodIds.map((paymentMethodId) => ({
+                    salesChannelId,
+                    paymentMethodId,
+                })),
+            },
+        },
+    });
+    expect(
+        assignResponse.ok(),
+        `Could not assign payment methods to the sales channel: ${assignResponse.status()} ${await assignResponse.text()}`,
+    ).toBeTruthy();
+}
+
 async function setSalesChannelPaymentMethod(
     adminApi: AdminApiContext,
-    testDataService: SalesChannelPaymentAssigner,
     salesChannelId: string,
     paymentMethodId: string,
 ): Promise<void> {
-    await testDataService.assignSalesChannelPaymentMethod(salesChannelId, paymentMethodId);
+    await assignSalesChannelPaymentMethods(adminApi, salesChannelId, [paymentMethodId]);
 
     const patchResponse = await adminApi.patch(`./sales-channel/${salesChannelId}`, {
         data: {
@@ -336,26 +354,7 @@ export async function preparePayPartsCardCheckout(
     }
 
     await ensureMethodActive(adminApi, selected);
-    const assignResponse = await adminApi.post('./_action/sync', {
-        data: {
-            'write-sales-channel-payment-method': {
-                entity: 'sales_channel_payment_method',
-                action: 'upsert',
-                payload: [{ salesChannelId, paymentMethodId: selected.id }],
-            },
-        },
-    });
-    expect(
-        assignResponse.ok(),
-        `Could not assign the card method to the sales channel: ${assignResponse.status()} ${await assignResponse.text()}`,
-    ).toBeTruthy();
-    const patchResponse = await adminApi.patch(`./sales-channel/${salesChannelId}`, {
-        data: { paymentMethodId: selected.id },
-    });
-    expect(
-        patchResponse.ok(),
-        `Could not set the sales channel payment method: ${patchResponse.status()} ${await patchResponse.text()}`,
-    ).toBeTruthy();
+    await setSalesChannelPaymentMethod(adminApi, salesChannelId, selected.id);
 
     return selected;
 }
@@ -366,7 +365,6 @@ function isPayPartsCardPaynlId(paynlId: string): boolean {
 
 export async function installIndividualPayPaymentMethods(
     adminApi: AdminApiContext,
-    testDataService: SalesChannelPaymentAssigner,
     salesChannelId: string,
 ): Promise<PayPaymentMethod[]> {
     const methods = await syncPayPaymentMethods(
@@ -379,7 +377,12 @@ export async function installIndividualPayPaymentMethods(
         installed.length,
         'No individual PAY. payment methods were installed.',
     ).toBeGreaterThan(0);
-    await setSalesChannelPaymentMethod(adminApi, testDataService, salesChannelId, installed[0].id);
+    await assignSalesChannelPaymentMethods(
+        adminApi,
+        salesChannelId,
+        installed.map((method) => method.id),
+    );
+    await setSalesChannelPaymentMethod(adminApi, salesChannelId, installed[0].id);
 
     return installed;
 }
@@ -390,7 +393,6 @@ function isInstalledPaynlId(paynlId: string): boolean {
 
 export async function assignPayPaymentMethod(
     adminApi: AdminApiContext,
-    testDataService: SalesChannelPaymentAssigner,
     salesChannelId: string,
     preferredName = process.env.PAY_PAYMENT_METHOD || 'Pay by PAY.',
 ): Promise<PayPaymentMethod> {
@@ -419,14 +421,13 @@ export async function assignPayPaymentMethod(
     }
 
     await ensureMethodActive(adminApi, selected);
-    await setSalesChannelPaymentMethod(adminApi, testDataService, salesChannelId, selected.id);
+    await setSalesChannelPaymentMethod(adminApi, salesChannelId, selected.id);
 
     return selected;
 }
 
 export async function assignIdealPaymentMethod(
     adminApi: AdminApiContext,
-    testDataService: SalesChannelPaymentAssigner,
     salesChannelId: string,
 ): Promise<PayPaymentMethod> {
     const methods = await syncPayPaymentMethods(
@@ -444,7 +445,7 @@ export async function assignIdealPaymentMethod(
     }
 
     await ensureMethodActive(adminApi, selected);
-    await setSalesChannelPaymentMethod(adminApi, testDataService, salesChannelId, selected.id);
+    await setSalesChannelPaymentMethod(adminApi, salesChannelId, selected.id);
 
     return selected;
 }
