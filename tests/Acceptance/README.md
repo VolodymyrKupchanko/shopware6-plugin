@@ -47,6 +47,6 @@ npm run env:plugin
 npm test
 ```
 
-To use an existing shop instead of `env:up`, set `APP_URL` (public HTTPS, trailing slash) and `ADMIN_API_URL` in `.env`, install the plugin yourself, enable test mode, and install payment methods. PAY. still needs that public HTTPS callback URL.
+To use an existing shop instead of `env:up`, set `APP_URL` and `ADMIN_API_URL` in `.env` to the same public HTTPS URL with a trailing slash. Install the plugin yourself, enable test mode, and install payment methods. PAY. still needs that public HTTPS callback URL. `env:up` writes both values; Playwright reads them from `.env`.
 
 Open the last HTML report with `npm run report` (port 9324). If that port is busy, use `npx playwright show-report --port 9325`.
