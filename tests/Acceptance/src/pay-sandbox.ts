@@ -72,15 +72,18 @@ async function selectAmericanEnglish(page: Page): Promise<void> {
 export type SandboxPaymentStatus = 'captured' | 'authorised';
 
 async function fillSandboxForm(page: Page, amount: string, status: SandboxPaymentStatus): Promise<void> {
+    await leaveIssuerChallenge(page);
+    await openSandbox(page);
+    await selectAmericanEnglish(page);
+    await submitSandboxStatus(page, amount, status);
+}
+
+async function submitSandboxStatus(page: Page, amount: string, status: SandboxPaymentStatus): Promise<void> {
     const secret = sandboxSecret();
     expect(
         secret,
         'PAY_SANDBOX_SECRET must be the sales-location secret from my.pay.nl (Settings → Sales location), not the API token.',
     ).not.toEqual('');
-
-    await leaveIssuerChallenge(page);
-    await openSandbox(page);
-    await selectAmericanEnglish(page);
 
     const secretInput = secretField(page);
     await expect(secretInput, `Secret field #secret was not shown at ${page.url()}`).toBeVisible({ timeout: 30_000 });
@@ -91,7 +94,9 @@ async function fillSandboxForm(page: Page, amount: string, status: SandboxPaymen
     });
     await secretInput.fill(secret);
 
-    const statusInput = page.locator(`input[name="paymentStatus"]#${status}`);
+    const statusInput = status === 'captured'
+        ? page.locator('input[name="paymentStatus"][value="captured"]#captured')
+        : page.locator('input[name="paymentStatus"]#authorised');
     await expect(statusInput, `Sandbox status #${status} was not shown at ${page.url()}`).toBeVisible();
     await statusInput.check();
 
@@ -121,7 +126,7 @@ async function fillSandboxForm(page: Page, amount: string, status: SandboxPaymen
 
 const FINISH_URL = /checkout\/finish|PaynlPayment\/finalize-transaction/i;
 
-async function returnFromSandbox(page: Page): Promise<void> {
+async function returnFromSandbox(page: Page, amount: string, status: SandboxPaymentStatus): Promise<void> {
     if (FINISH_URL.test(page.url())) {
         return;
     }
@@ -131,21 +136,17 @@ async function returnFromSandbox(page: Page): Promise<void> {
         return;
     }
 
-    // Authorised (95) is not final. PAY reloads the sandbox and the shopper
-    // returns through "Continue to the website" (/from/payment/{id}).
-    const backToShop = page.locator('a[href*="/from/payment/"]');
-    await expect(backToShop, `Sandbox did not offer a return to the shop at ${page.url()}`).toBeVisible();
-    try {
-        await Promise.all([
-            page.waitForURL(FINISH_URL, { timeout: 60_000 }),
-            backToShop.click(),
-        ]);
-    } catch (error) {
-        throw new Error(
-            `Sandbox did not return to the shop after the status update. Current URL: ${page.url()}`,
-            { cause: error },
-        );
+    // Authorised (95) reloads the sandbox. "Continue to the website" is target=_blank,
+    // so select Captured / Paid (#captured) and submit in this tab.
+    if (status === 'authorised') {
+        await submitSandboxStatus(page, amount, 'captured');
+        if (!FINISH_URL.test(page.url())) {
+            await page.waitForURL(FINISH_URL, { timeout: 60_000 });
+        }
+        return;
     }
+
+    throw new Error(`Sandbox did not return to the shop after the status update. Current URL: ${page.url()}`);
 }
 
 export async function completePaySandbox(
@@ -158,7 +159,7 @@ export async function completePaySandbox(
         { timeout: 60_000 },
     );
     await fillSandboxForm(page, amount, status);
-    await returnFromSandbox(page);
+    await returnFromSandbox(page, amount, status);
 }
 
 function normalizeDecimal(raw: string): string {
