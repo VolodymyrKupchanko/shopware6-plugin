@@ -25,7 +25,7 @@ export async function captureAuthorizedOrder(page: Page, orderId: string): Promi
     expect(payload.currentActionName).toBe('paid');
 }
 
-export async function refundOrder(page: Page, orderId: string): Promise<void> {
+export async function refundOrder(page: Page, orderId: string): Promise<RefundMessage[]> {
     const refundData = page.waitForResponse(isRefundData, { timeout: 60_000 });
     await page.goto(`./#/paynl/refund/page/view/${orderId}`, { waitUntil: 'domcontentloaded' });
     await dismissAdminPopups(page);
@@ -53,8 +53,19 @@ export async function refundOrder(page: Page, orderId: string): Promise<void> {
     const refundResponse = await refundResponsePromise;
     const refundBody = await refundResponse.text();
     expect(refundResponse.ok(), `Refund failed: ${refundResponse.status()} ${refundBody}`).toBeTruthy();
-    const messages = JSON.parse(refundBody) as Array<{ type?: string; content?: string }>;
-    expect(messages[0]?.type, messages[0]?.content).toBe('success');
+    return JSON.parse(refundBody) as RefundMessage[];
+}
+
+export type RefundMessage = { type?: string; content?: string };
+
+/** Fails before later order-state checks when PAY refuses the refund. */
+export function assertPayRefundAccepted(messages: RefundMessage[]): void {
+    const content = messages[0]?.content ?? '';
+    expect(
+        content,
+        'PAY. refused the refund. The plugin refund switches are on and the order can be read, but this API token cannot refund the payment. Enable the refund right for the token in my.pay.nl.',
+    ).not.toMatch(/forbidden/i);
+    expect(messages[0]?.type, content).toBe('success');
 }
 
 function isChangeTransactionStatus(response: Response): boolean {

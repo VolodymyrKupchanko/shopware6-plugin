@@ -119,6 +119,35 @@ async function fillSandboxForm(page: Page, amount: string, status: SandboxPaymen
     }
 }
 
+const FINISH_URL = /checkout\/finish|PaynlPayment\/finalize-transaction/i;
+
+async function returnFromSandbox(page: Page): Promise<void> {
+    if (FINISH_URL.test(page.url())) {
+        return;
+    }
+
+    const redirected = await page.waitForURL(FINISH_URL, { timeout: 15_000 }).then(() => true).catch(() => false);
+    if (redirected) {
+        return;
+    }
+
+    // Authorised (95) is not final. PAY reloads the sandbox and the shopper
+    // returns through "Continue to the website" (/from/payment/{id}).
+    const backToShop = page.locator('a[href*="/from/payment/"]');
+    await expect(backToShop, `Sandbox did not offer a return to the shop at ${page.url()}`).toBeVisible();
+    try {
+        await Promise.all([
+            page.waitForURL(FINISH_URL, { timeout: 60_000 }),
+            backToShop.click(),
+        ]);
+    } catch (error) {
+        throw new Error(
+            `Sandbox did not return to the shop after the status update. Current URL: ${page.url()}`,
+            { cause: error },
+        );
+    }
+}
+
 export async function completePaySandbox(
     page: Page,
     amount: string,
@@ -129,8 +158,7 @@ export async function completePaySandbox(
         { timeout: 60_000 },
     );
     await fillSandboxForm(page, amount, status);
-
-    await page.waitForURL(/checkout\/finish|PaynlPayment\/finalize-transaction/i, { timeout: 60_000 });
+    await returnFromSandbox(page);
 }
 
 function normalizeDecimal(raw: string): string {

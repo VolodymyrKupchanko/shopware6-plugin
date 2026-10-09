@@ -1,6 +1,6 @@
 import { test, expect, type FixtureTypes } from '@shopware-ag/acceptance-test-suite';
 import type { Locator, Page } from '@playwright/test';
-import { captureAuthorizedOrder, refundOrder } from '../src/admin-order';
+import { assertPayRefundAccepted, captureAuthorizedOrder, refundOrder } from '../src/admin-order';
 import { dismissAdminPopups, openAdmin } from '../src/admin-popups';
 import { completePaySandbox, parseAmount, type SandboxPaymentStatus } from '../src/pay-sandbox';
 import {
@@ -270,7 +270,8 @@ test.describe('PAY. admin capture and refund', () => {
             const before = await readPaynlTransactionState(AdminApiContext, paid.id);
             expect(before.stateId).toBe(100);
 
-            await step(adminPage, 'Refund the order', () => refundOrder(adminPage, paid.id));
+            const refundMessages = await step(adminPage, 'Refund the order', () => refundOrder(adminPage, paid.id));
+            assertPayRefundAccepted(refundMessages);
 
             const after = await readPaynlTransactionState(AdminApiContext, paid.id);
             expect(
