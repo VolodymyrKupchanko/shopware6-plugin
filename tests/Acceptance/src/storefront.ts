@@ -1,4 +1,7 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type BrowserContext, type Page } from '@playwright/test';
+
+const PROFILER_CSS = '.sf-toolbar, .sf-toolbar-block { display: none !important; pointer-events: none !important; }';
+const ACCEPT_ALL_COOKIES = /accept all|alle cookies accepteren|alle cookies akzeptieren/i;
 
 export async function prepareStorefront(page: Page): Promise<void> {
     await page.setExtraHTTPHeaders({ 'ngrok-skip-browser-warning': 'true' });
@@ -10,9 +13,15 @@ export async function prepareStorefront(page: Page): Promise<void> {
 }
 
 export async function acceptCookies(page: Page): Promise<void> {
-    const button = page.getByRole('button', { name: /accept all cookies|alle cookies accepteren|alle cookies akzeptieren/i }).first();
-    if (await button.isVisible({ timeout: 4000 }).catch(() => false)) {
-        await button.click();
+    const acceptAll = page.getByRole('button', { name: ACCEPT_ALL_COOKIES }).first();
+    if (await acceptAll.isVisible({ timeout: 4000 }).catch(() => false)) {
+        await acceptAll.click();
+        return;
+    }
+
+    const requiredOnly = page.getByRole('button', { name: /only technically required/i }).first();
+    if (await requiredOnly.isVisible({ timeout: 1000 }).catch(() => false)) {
+        await requiredOnly.click();
     }
 }
 
@@ -43,9 +52,15 @@ export async function isPasswordRequired(page: Page): Promise<boolean> {
 }
 
 export async function hideProfiler(page: Page): Promise<void> {
-    await page.addStyleTag({
-        content: '.sf-toolbar, .sf-toolbar-block { display: none !important; }',
-    }).catch(() => undefined);
+    await page.addStyleTag({ content: PROFILER_CSS }).catch(() => undefined);
+}
+
+export async function hideProfilerOnContext(context: BrowserContext): Promise<void> {
+    await context.addInitScript((css: string) => {
+        const style = document.createElement('style');
+        style.textContent = css;
+        document.documentElement.append(style);
+    }, PROFILER_CSS);
 }
 
 async function storefrontFailureContext(page: Page): Promise<string> {

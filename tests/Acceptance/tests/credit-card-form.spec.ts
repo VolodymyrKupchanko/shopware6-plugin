@@ -1,6 +1,7 @@
 import { expect, test, clearDelayedCache } from '@shopware-ag/acceptance-test-suite';
 import type { FixtureTypes, IdProvider, Page } from '@shopware-ag/acceptance-test-suite';
 import { preparePayPartsCardCheckout } from '../src/shopware-admin';
+import { acceptCookies, hideProfilerOnContext } from '../src/storefront';
 
 type AdminApi = FixtureTypes['AdminApiContext'];
 
@@ -112,11 +113,7 @@ test.skip('Pay.Parts credit card form is shown on checkout confirm', async ({
                 },
             });
         });
-        await context.addInitScript(() => {
-            const style = document.createElement('style');
-            style.textContent = '.sf-toolbar{display:none!important;pointer-events:none!important;}';
-            document.documentElement.append(style);
-        });
+        await hideProfilerOnContext(context);
         const page = await context.newPage();
 
         try {
@@ -136,7 +133,7 @@ test.skip('Pay.Parts credit card form is shown on checkout confirm', async ({
 
 async function openCheckoutConfirm(page: Page, shopper: Shopper, productId: string): Promise<void> {
     await page.goto('account/login');
-    await dismissCookieBanner(page);
+    await acceptCookies(page);
     await page.locator('#loginMail').fill(shopper.email);
     await page.locator('#loginPassword').fill(shopper.password);
     await page.locator('.login-form button[type="submit"]').click();
@@ -160,7 +157,7 @@ async function expectCreditCardForm(page: Page): Promise<void> {
     // can be before the SDK module has evaluated, so reload once the script is available.
     if (await sdkError.isVisible()) {
         await page.reload();
-        await dismissCookieBanner(page);
+        await acceptCookies(page);
         await waitForPayPartsSdk(page);
     }
 
@@ -168,7 +165,7 @@ async function expectCreditCardForm(page: Page): Promise<void> {
         timeout: SDK_READY_TIMEOUT_MS,
     });
     await expect(sdkError).toBeHidden();
-    await dismissCookieBanner(page);
+    await acceptCookies(page);
     await expect(gate.locator('[data-cc-ctp-slot].payparts-click-to-pay--expanded')).toBeVisible();
     await expect(gate.locator('.payparts-ctp-wrapper[data-method-id="1"]')).toBeVisible();
 
@@ -241,16 +238,6 @@ async function waitForPayPartsSdk(page: Page): Promise<void> {
 
         return sdk !== undefined || document.querySelector('.payparts-cc-gate__ctp') !== null;
     }, undefined, { timeout: SDK_READY_TIMEOUT_MS });
-}
-
-async function dismissCookieBanner(page: Page): Promise<void> {
-    const accept = page.getByRole('button', { name: /accept all|only technically required/i }).first();
-
-    try {
-        await accept.click({ timeout: 3_000 });
-    } catch {
-        // The banner is absent when consent was already stored.
-    }
 }
 
 async function findStorefrontShop(adminApi: AdminApi): Promise<StorefrontShop> {

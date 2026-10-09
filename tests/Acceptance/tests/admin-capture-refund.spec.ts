@@ -2,45 +2,28 @@ import { test, expect, type FixtureTypes } from '@shopware-ag/acceptance-test-su
 import type { Locator, Page } from '@playwright/test';
 import { assertPayRefundAccepted, refundOrder } from '../src/admin-order';
 import { dismissAdminPopups, openAdmin } from '../src/admin-popups';
-import { completePaySandbox, parseAmount, type SandboxPaymentStatus } from '../src/pay-sandbox';
+import {
+    acceptTermsAndSubmitOrder,
+    reachGuestCheckoutConfirm,
+    selectPayPaymentMethod,
+    type GuestCheckout,
+} from '../src/guest-checkout';
+import { completePaySandbox, type SandboxPaymentStatus } from '../src/pay-sandbox';
 import {
     assignPayPaymentMethod,
-    ensureStorefrontDomainAliases,
     readPaynlTransactionState,
     waitForOrderPaymentState,
 } from '../src/shopware-admin';
-import { addProductToCart, enableGuestCheckout, isPasswordRequired, prepareStorefront } from '../src/storefront';
+import { step } from '../src/step';
 
 const REFUND_STATUS_CODES = [-72, -81, -82];
 const ALLOW_REFUNDS = /^(allow refunds|erstattungen zulassen|restituties toestaan)$/i;
 const ALLOW_NATIVE_REFUNDS = /^(allow shopware native refunds|shopware native refunds zulassen|shopware native refunds toestaan)$/i;
 
-type CheckoutFixtures = Pick<
+type CheckoutFixtures = GuestCheckout & Pick<
     FixtureTypes,
-    | 'StorefrontPage'
-    | 'StorefrontProductDetail'
-    | 'StorefrontCheckoutConfirm'
-    | 'StorefrontCheckoutFinish'
-    | 'ProductData'
-    | 'DefaultSalesChannel'
-    | 'AdminApiContext'
-    | 'ShopCustomer'
-    | 'Register'
+    'StorefrontCheckoutConfirm' | 'StorefrontCheckoutFinish'
 >;
-
-async function step<T>(page: Page, title: string, body: () => Promise<T>): Promise<T> {
-    return test.step(title, async () => {
-        try {
-            return await body();
-        } catch (error) {
-            const image = await page.screenshot({ fullPage: true, timeout: 5_000 }).catch(() => null);
-            if (image) {
-                await test.info().attach(title, { body: image, contentType: 'image/png' });
-            }
-            throw error;
-        }
-    });
-}
 
 async function placePayOrder(
     fixtures: CheckoutFixtures,
@@ -48,14 +31,10 @@ async function placePayOrder(
 ): Promise<{ orderId: string; orderNumber: string | null }> {
     const {
         StorefrontPage,
-        StorefrontProductDetail,
         StorefrontCheckoutConfirm,
         StorefrontCheckoutFinish,
-        ProductData,
         DefaultSalesChannel,
         AdminApiContext,
-        ShopCustomer,
-        Register,
     } = fixtures;
 
     const payMethod = await step(StorefrontPage, 'Assign PAY. payment method', () => assignPayPaymentMethod(
@@ -63,59 +42,12 @@ async function placePayOrder(
         DefaultSalesChannel.salesChannel.id,
     ));
 
-    await step(StorefrontPage, 'Open the storefront', async () => {
-        await ensureStorefrontDomainAliases(
-            AdminApiContext,
-            DefaultSalesChannel.url,
-            DefaultSalesChannel.salesChannel.id,
-        );
-        await prepareStorefront(StorefrontPage);
-        await StorefrontPage.goto('./', { waitUntil: 'domcontentloaded' });
-    });
-
-    await step(StorefrontPage, 'Add the product and go to checkout', async () => {
-        await ShopCustomer.goesTo(`detail/${ProductData.id}`);
-        await addProductToCart(StorefrontPage);
-        await StorefrontProductDetail.offCanvasCartGoToCheckoutButton.click();
-        await StorefrontPage.waitForURL(/checkout\/(register|confirm)/);
-    });
-
-    await step(StorefrontPage, 'Register as a guest', async () => {
-        if (!StorefrontPage.url().includes('/checkout/register')) {
-            return;
-        }
-
-        await enableGuestCheckout(StorefrontPage);
-        const guest = !(await isPasswordRequired(StorefrontPage));
-        await ShopCustomer.attemptsTo(Register({ isGuest: guest, password: 'shopware' }));
-        await StorefrontPage.waitForURL(/checkout\/confirm/, { timeout: 30_000 });
-    });
+    await reachGuestCheckoutConfirm(fixtures);
 
     const expected = await step(StorefrontPage, 'Choose PAY. and place the order', async () => {
         await expect(StorefrontCheckoutConfirm.headline).toBeVisible();
-
-        const payRadio = StorefrontPage.locator(`input[name="paymentMethodId"][value="${payMethod.id}"]`);
-        if (await payRadio.count()) {
-            if (!(await payRadio.isChecked())) {
-                await payRadio.check({ force: true });
-                await StorefrontPage.waitForLoadState('domcontentloaded');
-            }
-        } else {
-            await StorefrontPage.getByText(payMethod.name, { exact: true }).first().click();
-        }
-
-        const tos = StorefrontCheckoutConfirm.termsAndConditionsWithLegalGuaranteeRightsCheckbox
-            .or(StorefrontCheckoutConfirm.termsAndConditionsCheckbox);
-        if (await tos.isVisible().catch(() => false)) {
-            await tos.check();
-        }
-
-        const totalText = (await StorefrontCheckoutConfirm.grandTotalPrice.textContent()) ?? '€ 10.00';
-        const parsed = parseAmount(totalText);
-        expect(parsed.amount, `Could not parse checkout total from "${totalText}"`).toBeGreaterThan(0);
-
-        await StorefrontCheckoutConfirm.submitOrderButton.click();
-        return parsed;
+        await selectPayPaymentMethod(StorefrontPage, payMethod);
+        return acceptTermsAndSubmitOrder(StorefrontCheckoutConfirm);
     });
 
     await step(StorefrontPage, `Complete the PAY. sandbox as ${status}`, () => completePaySandbox(

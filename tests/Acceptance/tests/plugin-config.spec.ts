@@ -1,22 +1,9 @@
 import { expect, test } from '@shopware-ag/acceptance-test-suite';
 import type { Page, Response } from '@playwright/test';
 import { dismissAdminPopups, openAdmin } from '../src/admin-popups';
+import { step } from '../src/step';
 
 const SUCCESS_TEXT = /correct credentials|link erfolgreich|koppeling geslaagd|paynlValidation\.messages\.correctCredentials/i;
-
-async function step<T>(page: Page, title: string, body: () => Promise<T>): Promise<T> {
-    return test.step(title, async () => {
-        try {
-            return await body();
-        } catch (error) {
-            const image = await page.screenshot({ fullPage: true, timeout: 5_000 }).catch(() => null);
-            if (image) {
-                await test.info().attach(title, { body: image, contentType: 'image/png' });
-            }
-            throw error;
-        }
-    });
-}
 
 function payCredentials(): { tokenCode: string; apiToken: string; serviceId: string } {
     const tokenCode = process.env.PAY_TOKEN_CODE || '';
